@@ -224,3 +224,4 @@ dist
 # .pnp.*
 
 # End of https://www.toptal.com/developers/gitignore/api/git,c,go,yarn,node
+!go.mod

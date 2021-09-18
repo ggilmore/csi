@@ -96,10 +96,11 @@ jobs:
         run: './ci/asdf-add-plugins.sh'
       - name: Install asdf tool versions and packages
         run: './ci/asdf-install.sh'
-      - name: golangci-lint
+      - name: 'golangci-lint (src)'
         uses: 'golangci/golangci-lint-action@v2.5.2'
         with:
           version: v1.39.0
+          working-directory: src
   prettier:
     name: Prettier formatting
     runs-on: ubuntu-18.04
