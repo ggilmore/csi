@@ -8,8 +8,14 @@ in  Setup.MakeJob
       , additionalSteps =
         [ GitHubActions.Step::{
           , name = Some "c-format"
-          , uses = Some "DoozyX/clang-format-lint-action@v0.11"
-          , `with` = Some (toMap { source = ".", clangFormatVersion = "11" })
+          , uses = Some "jidicula/clang-format-action@v4.0.0"
+          , `with` = Some
+              ( toMap
+                  { source = "."
+                  , clangFormatVersion = "11"
+                  , fallback-style = "Mozilla"
+                  }
+              )
           }
         ]
       }
