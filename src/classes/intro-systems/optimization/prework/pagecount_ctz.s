@@ -79,11 +79,10 @@ LBB1_1:                                 ## =>This Inner Loop Header: Depth=1
 	sub	rdx, rax
 	mov	eax, dword ptr [r12 + rdx]
 	add	eax, dword ptr [rsi + rdx]
-	add	r13d, eax
-	add	r13d, 1
+	lea	r13d, [r13 + rax + 1]
 	add	rcx, 8
-	add	rbx, 1
-	add	r14d, -1
+	inc	rbx
+	dec	r14d
 	jne	LBB1_1
 ## %bb.2:
 	call	_clock
@@ -114,8 +113,8 @@ LBB1_3:                                 ## =>This Inner Loop Header: Depth=1
 	lea	r12, [rip + l___const.main.msizes]
 	add	r13d, eax
 	add	r14, 8
-	add	rbx, 1
-	add	dword ptr [rbp - 44], -1        ## 4-byte Folded Spill
+	inc	rbx
+	dec	dword ptr [rbp - 44]            ## 4-byte Folded Spill
 	jne	LBB1_3
 ## %bb.4:
 	call	_clock
