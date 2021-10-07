@@ -7,13 +7,15 @@ http://stackoverflow.com/questions/9936132/why-does-the-order-of-the-loops-affec
 
 */
 
+#include "loop-order.h"
+
 void
 option_one()
 {
   int i, j;
-  static int x[4000][4000];
-  for (i = 0; i < 4000; i++) {
-    for (j = 0; j < 4000; j++) {
+  static int x[ROWS][COLS];
+  for (i = 0; i < ROWS; i++) {
+    for (j = 0; j < COLS; j++) {
       x[i][j] = i + j;
     }
   }
@@ -23,9 +25,9 @@ void
 option_two()
 {
   int i, j;
-  static int x[4000][4000];
-  for (i = 0; i < 4000; i++) {
-    for (j = 0; j < 4000; j++) {
+  static int x[ROWS][COLS];
+  for (i = 0; i < COLS; i++) {
+    for (j = 0; j < ROWS; j++) {
       x[j][i] = i + j;
     }
   }
@@ -34,7 +36,8 @@ option_two()
 int
 main()
 {
+
   option_one();
-  option_two();
+  // option_two();
   return 0;
 }
