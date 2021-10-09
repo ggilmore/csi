@@ -11,20 +11,11 @@ import (
 type UserId int
 type UserMap map[UserId]*User
 
-type DollarAmount struct {
-	cents   uint8
-	dollars uint32
-}
-
-type Payment struct {
-	amount DollarAmount
-}
-
 type User struct {
 	id       UserId
 	name     string
 	age      int
-	payments []Payment
+	payments []int
 }
 
 func AverageAge(users UserMap) float64 {
@@ -41,11 +32,11 @@ func AveragePaymentAmount(users UserMap) float64 {
 	for _, u := range users {
 		for _, p := range u.payments {
 			count += 1
-			amount := float64(p.amount.dollars) + float64(p.amount.cents)/100
+			amount := float64(p)
 			average += (amount - average) / count
 		}
 	}
-	return average
+	return average / 100
 }
 
 // Compute the standard deviation of payment amounts
@@ -55,7 +46,7 @@ func StdDevPaymentAmount(users UserMap) float64 {
 	for _, u := range users {
 		for _, p := range u.payments {
 			count += 1
-			amount := float64(p.amount.dollars) + float64(p.amount.cents)/100
+			amount := float64(p / 100)
 			diff := amount - mean
 			squaredDiffs += diff * diff
 		}
@@ -79,7 +70,7 @@ func LoadData() UserMap {
 		id, _ := strconv.Atoi(line[0])
 		name := line[1]
 		age, _ := strconv.Atoi(line[2])
-		users[UserId(id)] = &User{UserId(id), name, age, []Payment{}}
+		users[UserId(id)] = &User{id: UserId(id), name: name, age: age, payments: []int{}}
 	}
 
 	f, err = os.Open("payments.csv")
@@ -95,9 +86,7 @@ func LoadData() UserMap {
 	for _, line := range paymentLines {
 		userID, _ := strconv.Atoi(line[2])
 		paymentCents, _ := strconv.Atoi(line[0])
-		users[UserId(userID)].payments = append(users[UserId(userID)].payments, Payment{
-			DollarAmount{dollars: uint32(paymentCents / 100), cents: uint8(paymentCents % 100)},
-		})
+		users[UserId(userID)].payments = append(users[UserId(userID)].payments, paymentCents)
 	}
 
 	return users
