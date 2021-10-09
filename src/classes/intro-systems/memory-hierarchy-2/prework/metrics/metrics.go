@@ -6,7 +6,6 @@ import (
 	"math"
 	"os"
 	"strconv"
-	"time"
 )
 
 type UserId int
@@ -24,7 +23,6 @@ type DollarAmount struct {
 
 type Payment struct {
 	amount DollarAmount
-	time   time.Time
 }
 
 type User struct {
@@ -105,10 +103,8 @@ func LoadData() UserMap {
 	for _, line := range paymentLines {
 		userID, _ := strconv.Atoi(line[2])
 		paymentCents, _ := strconv.Atoi(line[0])
-		datetime, _ := time.Parse(time.RFC3339, line[1])
 		users[UserId(userID)].payments = append(users[UserId(userID)].payments, Payment{
 			DollarAmount{dollars: uint32(paymentCents / 100), cents: uint8(paymentCents % 100)},
-			datetime,
 		})
 	}
 
