@@ -18,7 +18,8 @@ type Address struct {
 }
 
 type DollarAmount struct {
-	dollars, cents uint64
+	cents   uint8
+	dollars uint32
 }
 
 type Payment struct {
@@ -102,11 +103,11 @@ func LoadData() UserMap {
 	}
 
 	for _, line := range paymentLines {
-		userId, _ := strconv.Atoi(line[2])
+		userID, _ := strconv.Atoi(line[2])
 		paymentCents, _ := strconv.Atoi(line[0])
 		datetime, _ := time.Parse(time.RFC3339, line[1])
-		users[UserId(userId)].payments = append(users[UserId(userId)].payments, Payment{
-			DollarAmount{uint64(paymentCents / 100), uint64(paymentCents % 100)},
+		users[UserId(userID)].payments = append(users[UserId(userID)].payments, Payment{
+			DollarAmount{dollars: uint32(paymentCents / 100), cents: uint8(paymentCents % 100)},
 			datetime,
 		})
 	}
