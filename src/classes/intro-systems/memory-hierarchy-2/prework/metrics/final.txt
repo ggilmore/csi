@@ -1,0 +1,11 @@
+geoffrey@geoffrey-server ~/d/c/s/c/i/m/p/metrics (mem-golang)> ./bench.sh
++ go test -bench=.
+goos: linux
+goarch: amd64
+pkg: github.com/ggilmore/csi/src/classes/intro-systems/memory-hierarchy-2/prework/metrics
+cpu: Intel(R) Core(TM) i7-7700K CPU @ 4.20GHz
+BenchmarkMetrics/Average_age-8              2456            488578 ns/op
+BenchmarkMetrics/Average_payment-8           242           4912768 ns/op
+BenchmarkMetrics/Payment_stddev-8            192           6227807 ns/op
+PASS
+ok      github.com/ggilmore/csi/src/classes/intro-systems/memory-hierarchy-2/prework/metrics    5.216s

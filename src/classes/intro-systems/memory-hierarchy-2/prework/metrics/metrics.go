@@ -8,8 +8,8 @@ import (
 	"strconv"
 )
 
-type UserId int
-type UserMap map[UserId]*User
+type UserID int
+type UserMap map[UserID]*User
 
 type Users struct {
 	userMap UserMap
@@ -19,8 +19,10 @@ type Users struct {
 }
 
 type User struct {
-	id UserId
+	id UserID
 
+	// I keep these indices around to keep the general
+	// datastructure somewhat useful.
 	ageIndex       int
 	paymentIndexes []int
 }
@@ -82,8 +84,8 @@ func LoadData() Users {
 		age, _ := strconv.Atoi(line[2])
 		users.allAges = append(users.allAges, age)
 
-		users.userMap[UserId(id)] = &User{
-			id:       UserId(id),
+		users.userMap[UserID(id)] = &User{
+			id:       UserID(id),
 			ageIndex: len(users.allAges) - 1,
 		}
 	}
@@ -103,7 +105,7 @@ func LoadData() Users {
 		paymentCents, _ := strconv.Atoi(line[0])
 
 		users.allPayments = append(users.allPayments, paymentCents)
-		id := UserId(userID)
+		id := UserID(userID)
 
 		user := users.userMap[id]
 		user.paymentIndexes = append(user.paymentIndexes, len(users.allPayments)-1)
