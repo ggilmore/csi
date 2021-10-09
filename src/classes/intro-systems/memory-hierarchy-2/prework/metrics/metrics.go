@@ -13,7 +13,6 @@ type UserMap map[UserId]*User
 
 type User struct {
 	id       UserId
-	name     string
 	age      int
 	payments []int
 }
@@ -68,9 +67,8 @@ func LoadData() UserMap {
 	users := make(UserMap, len(userLines))
 	for _, line := range userLines {
 		id, _ := strconv.Atoi(line[0])
-		name := line[1]
 		age, _ := strconv.Atoi(line[2])
-		users[UserId(id)] = &User{id: UserId(id), name: name, age: age, payments: []int{}}
+		users[UserId(id)] = &User{id: UserId(id), age: age}
 	}
 
 	f, err = os.Open("payments.csv")
