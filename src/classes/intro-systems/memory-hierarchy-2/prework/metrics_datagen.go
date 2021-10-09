@@ -1,3 +1,4 @@
+//nolint // This file was provided to me.
 package main
 
 import (
@@ -6,6 +7,7 @@ import (
 	"math/rand"
 	"strconv"
 	"strings"
+
 	//	"fmt"
 	"log"
 	"os"
