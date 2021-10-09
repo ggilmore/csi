@@ -41,5 +41,4 @@ func BenchmarkMetrics(b *testing.B) {
 			b.Fatalf("Expected standard deviation to be around %.2f, not %.3f", expected, actual)
 		}
 	})
-
 }
