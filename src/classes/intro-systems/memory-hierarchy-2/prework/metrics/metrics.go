@@ -11,11 +11,6 @@ import (
 type UserId int
 type UserMap map[UserId]*User
 
-type Address struct {
-	fullAddress string
-	zip         int
-}
-
 type DollarAmount struct {
 	cents   uint8
 	dollars uint32
@@ -29,7 +24,6 @@ type User struct {
 	id       UserId
 	name     string
 	age      int
-	address  Address
 	payments []Payment
 }
 
@@ -85,9 +79,7 @@ func LoadData() UserMap {
 		id, _ := strconv.Atoi(line[0])
 		name := line[1]
 		age, _ := strconv.Atoi(line[2])
-		address := line[3]
-		zip, _ := strconv.Atoi(line[3])
-		users[UserId(id)] = &User{UserId(id), name, age, Address{address, zip}, []Payment{}}
+		users[UserId(id)] = &User{UserId(id), name, age, []Payment{}}
 	}
 
 	f, err = os.Open("payments.csv")
