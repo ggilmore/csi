@@ -1,7 +1,7 @@
 # copied from https://github.com/sourcegraph/sourcegraph/blob/0f2b75eea62a52ae7ad966bf5c4a6941043401a7/.golangci.yml
 linters-settings:
   dupl:
-    threshold: 100
+    threshold: 1000
   gocritic:
     enabled-tags:
       - diagnostic
