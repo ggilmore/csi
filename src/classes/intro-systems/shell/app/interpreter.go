@@ -39,22 +39,25 @@ func (i *Interpreter) execute(c *CommandExpression) error {
 		return err
 	}
 
-	var arguments []string
+	arguments := []string{path}
 	for _, arg := range c.Args {
 		arguments = append(arguments, arg.Lexeme)
 	}
 
-	// cwd, err := os.Getwd()
-	// if err != nil {
-	// 	return fmt.Errorf("getting working directory: %w", err)
-	// }
-
-	attr := &syscall.ProcAttr{
-		Dir:   "",
-		Files: []uintptr{os.Stdin.Fd(), os.Stdout.Fd(), os.Stderr.Fd()},
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("getting working directory: %w", err)
 	}
 
-	// fmt.Println("this is the path " + path)
+	attr := &syscall.ProcAttr{
+		Dir: cwd,
+		Env: os.Environ(),
+		Files: []uintptr{
+			os.Stdin.Fd(),
+			os.Stdout.Fd(),
+			os.Stderr.Fd(),
+		},
+	}
 
 	pid, err := syscall.ForkExec(path, arguments, attr)
 	if err != nil {
@@ -64,7 +67,7 @@ func (i *Interpreter) execute(c *CommandExpression) error {
 	var ws syscall.WaitStatus
 	_, err = syscall.Wait4(pid, &ws, 0, nil)
 	if err != nil {
-		panic(err)
+		return err
 	}
 
 	return nil
