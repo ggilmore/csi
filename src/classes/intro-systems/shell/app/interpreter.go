@@ -27,8 +27,25 @@ func (i *Interpreter) Interpret(program *Program) error {
 
 func (i *Interpreter) execute(c Command) error {
 	name := c.Program.Lexeme
-	path, err := exec.LookPath(name)
 
+	var arguments []string
+	for _, a := range c.Args {
+		arguments = append(arguments, a.Lexeme)
+	}
+
+	switch name {
+	case "cd":
+		return CDBuiltin.Run(arguments)
+	case "exit":
+		return ExitBuiltin.Run(arguments)
+
+	default:
+		return i.runExternalCommand(name, arguments)
+	}
+}
+
+func (i *Interpreter) runExternalCommand(name string, args []string) error {
+	path, err := exec.LookPath(name)
 	if err != nil {
 		if errors.Is(err, exec.ErrNotFound) {
 			return i.runtimeErrorf("%q: command not found", name)
@@ -38,9 +55,7 @@ func (i *Interpreter) execute(c Command) error {
 	}
 
 	arguments := []string{path}
-	for _, a := range c.Args {
-		arguments = append(arguments, a.Lexeme)
-	}
+	arguments = append(arguments, args...)
 
 	cwd, err := os.Getwd()
 	if err != nil {

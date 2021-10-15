@@ -17,7 +17,7 @@ type Scanner struct {
 func NewScanner(r io.Reader) (*Scanner, error) {
 	b, err := io.ReadAll(r)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read from reader: %w", err)
+		return nil, fmt.Errorf("reading input: %w", err)
 	}
 
 	text := []rune(string(b))
@@ -56,7 +56,7 @@ func (s *Scanner) scanToken() {
 
 		s.errs = append(s.errs, &parseError{
 			s.line,
-			fmt.Sprintf("Unexpected character %q", c),
+			fmt.Sprintf("unexpected character %q", c),
 		})
 	}
 }

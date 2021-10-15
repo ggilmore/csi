@@ -14,7 +14,7 @@ func TestParser(t *testing.T) {
 	for _, test := range []struct {
 		name     string
 		input    []Token
-		expected []*CommandExpression
+		expected []Command
 	}{
 		{
 			name:     "(empty)",
@@ -28,7 +28,7 @@ func TestParser(t *testing.T) {
 				arg1,
 				arg2,
 			},
-			expected: []*CommandExpression{{Program: programName, Args: []Token{arg1, arg2}}},
+			expected: []Command{{Program: programName, Args: []Token{arg1, arg2}}},
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
