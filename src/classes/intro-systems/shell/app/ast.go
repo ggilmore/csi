@@ -11,16 +11,16 @@ type Expression interface {
 }
 
 type Program struct {
-	Commands []CommandExpression
+	Commands []Command
 }
 
-type CommandExpression struct {
+type Command struct {
 	Program Token
 	Args    []Token
 }
 
-func (c *CommandExpression) isExpression() {}
-func (c *CommandExpression) String() string {
+func (c Command) isExpression() {}
+func (c Command) String() string {
 	var argumentStrings []string
 	for _, a := range c.Args {
 		argumentStrings = append(argumentStrings, a.String())
@@ -30,5 +30,5 @@ func (c *CommandExpression) String() string {
 }
 
 var (
-	_ Expression = &CommandExpression{}
+	_ Expression = &Command{}
 )

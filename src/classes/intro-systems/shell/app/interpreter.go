@@ -8,16 +8,15 @@ import (
 	"syscall"
 )
 
-type Interpreter struct {
-}
+type Interpreter struct{}
 
 func NewInterpreter() *Interpreter {
 	return &Interpreter{}
 }
 
-func (i *Interpreter) Interpret(input []*CommandExpression) error {
-	for _, s := range input {
-		err := i.execute(s)
+func (i *Interpreter) Interpret(program *Program) error {
+	for _, c := range program.Commands {
+		err := i.execute(c)
 		if err != nil {
 			return err
 		}
@@ -26,27 +25,26 @@ func (i *Interpreter) Interpret(input []*CommandExpression) error {
 	return nil
 }
 
-func (i *Interpreter) execute(c *CommandExpression) error {
+func (i *Interpreter) execute(c Command) error {
 	name := c.Program.Lexeme
 	path, err := exec.LookPath(name)
 
 	if err != nil {
-		var pathErr *os.PathError
-		if !errors.As(err, &pathErr) {
-			return fmt.Errorf("while looking up %q in PATH: %w", name, err)
+		if errors.Is(err, exec.ErrNotFound) {
+			return i.runtimeErrorf("%q: command not found", name)
 		}
 
-		return err
+		return i.runtimeErrorf("looking up %q in $PATH: %s", name, err)
 	}
 
 	arguments := []string{path}
-	for _, arg := range c.Args {
-		arguments = append(arguments, arg.Lexeme)
+	for _, a := range c.Args {
+		arguments = append(arguments, a.Lexeme)
 	}
 
 	cwd, err := os.Getwd()
 	if err != nil {
-		return fmt.Errorf("getting working directory: %w", err)
+		return i.runtimeErrorf("failed to get current working directory: %s", err)
 	}
 
 	attr := &syscall.ProcAttr{
@@ -61,14 +59,20 @@ func (i *Interpreter) execute(c *CommandExpression) error {
 
 	pid, err := syscall.ForkExec(path, arguments, attr)
 	if err != nil {
-		return fmt.Errorf("executing %q: %w", path, err)
+		return i.runtimeErrorf("running %q: %s", path, err)
 	}
 
 	var ws syscall.WaitStatus
 	_, err = syscall.Wait4(pid, &ws, 0, nil)
 	if err != nil {
-		return err
+		return i.runtimeErrorf("waiting on %q (pid %d): %s", path, pid, err)
 	}
 
 	return nil
+}
+
+func (i *Interpreter) runtimeErrorf(format string, a ...interface{}) error {
+	return &runtimeError{
+		Message: fmt.Sprintf(format, a...),
+	}
 }

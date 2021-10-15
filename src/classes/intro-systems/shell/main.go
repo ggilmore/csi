@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -43,8 +44,12 @@ func runPrompt(r io.Reader) {
 
 		err := runner.Run(strings.NewReader(line))
 		if err != nil {
-			fmt.Fprintln(os.Stderr, err.Error())
-			os.Exit(1)
+			printError(err)
+
+			var e app.RecoverableError
+			if !errors.As(err, &e) {
+				os.Exit(1)
+			}
 		}
 
 		fmt.Printf("\n%s", prompt)
@@ -77,15 +82,26 @@ func (r *runner) Run(input io.Reader) error {
 		return fmt.Errorf("scanning for tokens: %w", err)
 	}
 
-	statements, err := app.NewParser(tokens).Parse()
+	program, err := app.NewParser(tokens).Parse()
 	if err != nil {
 		return fmt.Errorf("while parsing: %w", err)
 	}
 
-	err = r.interpreter.Interpret(statements)
+	err = r.interpreter.Interpret(program)
 	if err != nil {
 		return fmt.Errorf("while interpreting: %w", err)
 	}
 
 	return nil
+}
+
+func printError(err error) {
+	var e app.RecoverableError
+	if errors.As(err, &e) {
+		// remove needless context if it's something that we can recover from
+		fmt.Fprint(os.Stderr, e.Error())
+		return
+	}
+
+	fmt.Fprint(os.Stderr, err.Error())
 }

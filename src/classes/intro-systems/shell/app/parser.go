@@ -17,28 +17,29 @@ func NewParser(input []Token) *Parser {
 	}
 }
 
-func (p *Parser) Parse() ([]*CommandExpression, error) {
-	var commands []*CommandExpression
+func (p *Parser) Parse() (*Program, error) {
+	var commands []Command
 
 	for !p.isAtEnd() {
-		command, err := p.command()
+		c, err := p.command()
 		if err != nil {
 			return nil, err
 		}
 
-		commands = append(commands, command)
+		commands = append(commands, c)
 	}
 
-	return commands, nil
+	return &Program{Commands: commands}, nil
 }
 
-func (p *Parser) command() (*CommandExpression, error) {
-	command := &CommandExpression{}
-
+func (p *Parser) command() (Command, error) {
 	if !p.match(KindWord) {
-		return nil, fmt.Errorf("expected program name")
+		return Command{}, fmt.Errorf("expected program name")
 	}
-	command.Program = p.previous()
+
+	command := Command{
+		Program: p.previous(),
+	}
 
 	for p.match(KindWord) {
 		command.Args = append(command.Args, p.previous())

@@ -7,7 +7,7 @@ import (
 type ErrorList []error
 
 func (e *ErrorList) Add(line int, message string) {
-	*e = append(*e, &ParseError{line, message})
+	*e = append(*e, &parseError{line, message})
 }
 
 func (e ErrorList) Error() string {
@@ -32,11 +32,32 @@ func (e ErrorList) ErrorOrNil() error {
 	return e
 }
 
-type ParseError struct {
+type RecoverableError interface {
+	IsRecoverableError()
+	Error() string
+}
+
+type parseError struct {
 	Line    int
 	Message string
 }
 
-func (e *ParseError) Error() string {
+func (e *parseError) Error() string {
 	return fmt.Sprintf("[line %d] Error: %s", e.Line, e.Message)
 }
+
+type runtimeError struct {
+	Message string
+}
+
+func (e *runtimeError) Error() string {
+	return e.Message
+}
+
+func (e *parseError) IsRecoverableError()   {}
+func (e *runtimeError) IsRecoverableError() {}
+
+var (
+	_ RecoverableError = &parseError{}
+	_ RecoverableError = &runtimeError{}
+)

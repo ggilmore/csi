@@ -14,8 +14,6 @@ type Scanner struct {
 	tokens []Token
 }
 
-const null = '\x00'
-
 func NewScanner(r io.Reader) (*Scanner, error) {
 	b, err := io.ReadAll(r)
 	if err != nil {
@@ -51,20 +49,20 @@ func (s *Scanner) scanToken() {
 		break
 
 	default:
-		if s.isWord(c) {
-			s.string()
+		if s.isWordCharacter(c) {
+			s.word()
 			break
 		}
 
-		s.errs = append(s.errs, &ParseError{
+		s.errs = append(s.errs, &parseError{
 			s.line,
 			fmt.Sprintf("Unexpected character %q", c),
 		})
 	}
 }
 
-func (s *Scanner) string() {
-	for s.isWord(s.peek()) {
+func (s *Scanner) word() {
+	for s.isWordCharacter(s.peek()) {
 		s.advance()
 	}
 
@@ -72,7 +70,9 @@ func (s *Scanner) string() {
 	s.addTokenLiteral(KindWord, contents)
 }
 
-func (s *Scanner) isWord(c rune) bool {
+const null = '\x00'
+
+func (s *Scanner) isWordCharacter(c rune) bool {
 	switch c {
 	case ' ', null:
 		return false
