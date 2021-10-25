@@ -23,4 +23,3 @@
   The goal of this implementation exercise is for you to gain familiarity with the underlying representations of these basic types (hence the strange constraints).
   ​
   You will find it helpful to use `uintptr` and `unsafe.Pointer` (see 13.1 - 13.2 of _The Go Programming Language_). You will likely also want to consult the Go source code, especially `runtime/map.go`, which you can find at `/usr/local/go/src` or on [Github](https://github.com/golang/go).
-  Collapse

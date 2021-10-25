@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math"
 	"testing"
 
 	fuzz "github.com/google/gofuzz"
@@ -48,7 +49,23 @@ func TestSumSlice(t *testing.T) {
 		actual := SumSlice(input)
 
 		if actual != expected {
-			t.Errorf("for (%+v).Y got: %d, wanted: %d", input, actual, expected)
+			t.Errorf("for %+v got: %d, wanted: %d", input, actual, expected)
+		}
+	}
+}
+
+func TestMapMax(t *testing.T) {
+	var input map[int]int
+	f := fuzz.New().NumElements(0, 10)
+
+	for i := 0; i < 1; i++ {
+		f.Fuzz(&input)
+
+		expected := correctMapMax(input)
+		actual := MapMax(input)
+
+		if actual != expected {
+			t.Errorf("for %+v got: %d, wanted: %d", input, actual, expected)
 		}
 	}
 }
@@ -60,4 +77,16 @@ func correctSumSlice(xs []int) int {
 	}
 
 	return sum
+}
+
+func correctMapMax(xs map[int]int) int {
+	max := math.MinInt
+
+	for _, v := range xs {
+		if v > max {
+			max = v
+		}
+	}
+
+	return max
 }
