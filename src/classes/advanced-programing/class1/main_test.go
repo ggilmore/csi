@@ -21,3 +21,19 @@ func TestStringLen(t *testing.T) {
 		}
 	}
 }
+
+func TestStructField(t *testing.T) {
+	var input point
+	f := fuzz.New()
+
+	for i := 0; i < 1000; i++ {
+		f.Fuzz(&input)
+
+		expected := input.Y
+		actual := StructField(input)
+
+		if actual != expected {
+			t.Errorf("for (%+v).Y got: %d, wanted: %d", input, actual, expected)
+		}
+	}
+}
