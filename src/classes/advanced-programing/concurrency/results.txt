@@ -1,0 +1,22 @@
++ go test --race -v --bench ./...
+=== RUN   TestService
+=== RUN   TestService/atomic_service
+=== RUN   TestService/mutex_service
+=== RUN   TestService/goroutine_service
+--- PASS: TestService (0.50s)
+    --- PASS: TestService/atomic_service (0.11s)
+    --- PASS: TestService/mutex_service (0.16s)
+    --- PASS: TestService/goroutine_service (0.23s)
+goos: darwin
+goarch: amd64
+pkg: github.com/ggilmore/csi/src/classes/advanced-programing/concurrency
+cpu: Intel(R) Core(TM) i9-9980HK CPU @ 2.40GHz
+BenchmarkService
+BenchmarkService/atomic_service
+BenchmarkService/atomic_service-16                     9         141234423 ns/op
+BenchmarkService/mutex_service
+BenchmarkService/mutex_service-16                      5         231965662 ns/op
+BenchmarkService/goroutine_service
+BenchmarkService/goroutine_service-16                  4         310086306 ns/op
+PASS
+ok      github.com/ggilmore/csi/src/classes/advanced-programing/concurrency     6.990s
