@@ -13,14 +13,16 @@ var responses = []string{
 }
 
 func randomDelay(maxMillis int) time.Duration {
+	// #nosec G404
 	return time.Duration(rand.Intn(maxMillis)) * time.Millisecond
 }
 
-func query(endpoint string) string {
+func query(_ string) string {
 	// Simulate querying the given endpoint
 	delay := randomDelay(100)
 	time.Sleep(delay)
 
+	// #nosec G404
 	i := rand.Intn(len(responses))
 	return responses[i]
 }

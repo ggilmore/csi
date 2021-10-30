@@ -76,7 +76,7 @@ type dbService struct {
 	connection string
 }
 
-func newDbService(connection string) *dbService {
+func newDBService(connection string) *dbService {
 	return &dbService{
 		lock:       &sync.RWMutex{},
 		connection: connection,
@@ -116,7 +116,7 @@ func (d *dbService) updateConnection(connection string) {
 // The first goroutine was acquiring the same readlock twice (reentrant).
 // Using the same technique as problem 6 fixes the issue.
 func main() {
-	d := newDbService("127.0.0.1:3001")
+	d := newDBService("127.0.0.1:3001")
 
 	var wg sync.WaitGroup
 
