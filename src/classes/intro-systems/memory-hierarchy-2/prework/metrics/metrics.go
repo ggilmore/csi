@@ -95,7 +95,6 @@ func StdDevPaymentAmount(users Users) float64 {
 		amount2 := float64(p2) * .01
 		diff2 := amount2 - mean
 		squaredDiffs2 += diff2 * diff2
-
 	}
 
 	for ; i < count; i++ {
@@ -128,7 +127,7 @@ func LoadData() Users {
 		id, _ := strconv.Atoi(line[0])
 
 		age, _ := strconv.Atoi(line[2])
-		users.allAges = append(users.allAges, int(age))
+		users.allAges = append(users.allAges, age)
 
 		users.userMap[UserID(id)] = &User{
 			id:       UserID(id),

@@ -2,6 +2,7 @@ package main
 
 import (
 	"math"
+	"os"
 	"testing"
 
 	fuzz "github.com/google/gofuzz"
@@ -39,6 +40,10 @@ func TestStructField(t *testing.T) {
 	}
 }
 func TestSumSlice(t *testing.T) {
+	if os.Getenv("CI") == "true" {
+		t.Skip("this is unsafe pointer math")
+	}
+
 	var input []int
 	f := fuzz.New().NumElements(0, 10)
 
@@ -55,6 +60,10 @@ func TestSumSlice(t *testing.T) {
 }
 
 func TestMapMax(t *testing.T) {
+	if os.Getenv("CI") == "true" {
+		t.Skip("this is unsafe pointer math")
+	}
+
 	var input map[int]int
 	f := fuzz.New().NumElements(0, 10)
 
