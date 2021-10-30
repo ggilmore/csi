@@ -47,6 +47,7 @@ type goroutineService struct {
 	counter  uint64
 }
 
+// revive:disable-next-line:unexported-return
 func NewGoRoutineService() *goroutineService {
 	return &goroutineService{
 		requests: make(chan struct{}),
