@@ -8,9 +8,6 @@ import (
 )
 
 func TestService(t *testing.T) {
-	workers := 10
-	callsPerWorker := 10000
-
 	goroutineService := NewGoRoutineService()
 	goroutineService.Start()
 	defer goroutineService.Stop()
@@ -25,19 +22,15 @@ func TestService(t *testing.T) {
 		{"goroutine service", goroutineService},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			workers := 10
+			callsPerWorker := 10000
+
 			validateService(t, test.service, workers, callsPerWorker)
 		})
 	}
 }
 
 func BenchmarkService(b *testing.B) {
-	workers := 10
-	callsPerWorker := 10000
-
-	goroutineService := NewGoRoutineService()
-	goroutineService.Start()
-	defer goroutineService.Stop()
-
 	for _, bench := range []struct {
 		name       string
 		newService func() (service idService, teardown func())
@@ -49,20 +42,23 @@ func BenchmarkService(b *testing.B) {
 			return &mutexService{}, func() {}
 		}},
 		{"goroutine service", func() (idService, func()) {
-			goroutineService := NewGoRoutineService()
-			goroutineService.Start()
+			s := NewGoRoutineService()
+			s.Start()
 
 			teardown := func() {
-				goroutineService.Stop()
+				s.Stop()
 			}
 
-			return goroutineService, teardown
+			return s, teardown
 		}},
 	} {
 		b.Run(bench.name, func(b *testing.B) {
 			for n := 0; n < b.N; n++ {
 				service, teardown := bench.newService()
 				defer teardown()
+
+				workers := 10
+				callsPerWorker := 10000
 
 				validateService(b, service, workers, callsPerWorker)
 			}
