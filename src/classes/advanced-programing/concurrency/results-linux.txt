@@ -1,0 +1,21 @@
+=== RUN   TestService
+=== RUN   TestService/atomic_service
+=== RUN   TestService/mutex_service
+=== RUN   TestService/goroutine_service
+--- PASS: TestService (0.38s)
+    --- PASS: TestService/atomic_service (0.08s)
+    --- PASS: TestService/mutex_service (0.10s)
+    --- PASS: TestService/goroutine_service (0.19s)
+goos: linux
+goarch: amd64
+pkg: github.com/ggilmore/csi/src/classes/advanced-programing/concurrency
+cpu: Intel(R) Core(TM) i7-7700K CPU @ 4.20GHz
+BenchmarkService
+BenchmarkService/atomic_service
+BenchmarkService/atomic_service-8         	      13	 150132435 ns/op
+BenchmarkService/mutex_service
+BenchmarkService/mutex_service-8          	       8	 136660842 ns/op
+BenchmarkService/goroutine_service
+BenchmarkService/goroutine_service-8      	       4	 319008232 ns/op
+PASS
+ok  	github.com/ggilmore/csi/src/classes/advanced-programing/concurrency	6.346s
