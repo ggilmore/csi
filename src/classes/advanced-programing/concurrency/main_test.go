@@ -70,13 +70,13 @@ func validateService(t testing.TB, service idService, workers, callsPerWorker in
 	t.Helper()
 
 	maxID := workers * callsPerWorker
-	maxIDChan := make(chan uint64, workers*callsPerWorker)
+	maxIDChan := make(chan uint32, workers*callsPerWorker)
 
 	var g errgroup.Group
 	for i := 0; i < workers; i++ {
 		workerID := i
 		g.Go(func() error {
-			lastID := uint64(0)
+			lastID := uint32(0)
 
 			for j := 0; j < callsPerWorker; j++ {
 				id := service.getNext()
@@ -99,14 +99,14 @@ func validateService(t testing.TB, service idService, workers, callsPerWorker in
 
 	close(maxIDChan)
 
-	maxIDSeen := uint64(0)
+	maxIDSeen := uint32(0)
 	for id := range maxIDChan {
 		if maxIDSeen < id {
 			maxIDSeen = id
 		}
 	}
 
-	if maxIDSeen != uint64(maxID) {
+	if maxIDSeen != uint32(maxID) {
 		t.Errorf("expected maxID across all workers to be %d, got %d", maxID, maxIDSeen)
 	}
 }

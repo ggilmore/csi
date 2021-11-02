@@ -8,7 +8,7 @@ import (
 type idService interface {
 	// Returns values in ascending order; it should be safe to call
 	// getNext() concurrently without any additional synchronization.
-	getNext() uint64
+	getNext() uint32
 }
 
 // type wildWestService struct {
@@ -21,19 +21,19 @@ type idService interface {
 // }
 
 type atomicService struct {
-	counter uint64
+	counter uint32
 }
 
-func (a *atomicService) getNext() uint64 {
-	return atomic.AddUint64(&a.counter, 1)
+func (a *atomicService) getNext() uint32 {
+	return atomic.AddUint32(&a.counter, 1)
 }
 
 type mutexService struct {
 	mu      sync.Mutex
-	counter uint64
+	counter uint32
 }
 
-func (m *mutexService) getNext() uint64 {
+func (m *mutexService) getNext() uint32 {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -43,15 +43,15 @@ func (m *mutexService) getNext() uint64 {
 
 type goroutineService struct {
 	requests chan struct{}
-	results  chan uint64
-	counter  uint64
+	results  chan uint32
+	counter  uint32
 }
 
 // revive:disable-next-line:unexported-return
 func NewGoRoutineService() *goroutineService {
 	return &goroutineService{
 		requests: make(chan struct{}),
-		results:  make(chan uint64),
+		results:  make(chan uint32),
 	}
 }
 
@@ -68,7 +68,7 @@ func (g *goroutineService) Stop() {
 	close(g.requests)
 }
 
-func (g *goroutineService) getNext() uint64 {
+func (g *goroutineService) getNext() uint32 {
 	g.requests <- struct{}{}
 	return <-g.results
 }
