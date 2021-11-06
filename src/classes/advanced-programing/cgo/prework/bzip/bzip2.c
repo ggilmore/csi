@@ -15,5 +15,6 @@ bz2compress(bz_stream* s,
   int r = BZ2_bzCompress(s, action);
   *inlen -= s->avail_in;
   *outlen -= s->avail_out;
+  s->next_in = s->next_out = NULL;
   return r;
 }
