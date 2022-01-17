@@ -2,10 +2,12 @@ package main
 
 import (
 	"fmt"
+	"golang.org/x/sync/errgroup"
 	"io"
 	"log"
 	"net"
 	"os"
+	"strings"
 	"syscall"
 )
 
@@ -32,41 +34,92 @@ func main() {
 			log.Fatalln(os.NewSyscallError("accept", err))
 		}
 
-		to, err := connect(targetIP, targetPort)
-		if err != nil {
-			log.Fatalf("failed to connect to %s:%d :%s", targetIP, targetPort, err)
-		}
+		go func() {
+			to, err := connect(targetIP, targetPort)
+			if err != nil {
+				log.Printf("failed to connect to %s:%d :%s", targetIP, targetPort, err)
+			}
 
-		go forward(from, to)
+			err = proxyOnce(from, to)
+			if err != nil {
+				log.Printf("while proxying request: %s", err)
+			}
+
+			log.Printf("closing sockets...")
+
+			if err = from.close(); err != nil {
+				log.Printf("failed to close 'from' socket: %s", err)
+			}
+
+			if err = to.close(); err != nil {
+				log.Printf("failed to close 'to' socket: %s", err)
+			}
+
+			log.Printf("closed sockets...")
+		}()
 	}
-
 }
 
 func echo(s socket) error {
-	return forward(s, s)
+	return proxyOnce(s, s)
 }
 
-func forward(from, to socket) error {
+func proxyOnce(from, to socket) error {
+	var errGroup errgroup.Group
+
+	var requestData = make([]byte, 65535)
+
 	for {
 		data := make([]byte, 65535)
 		n, err := from.read(data)
 		if err != nil {
-			return fmt.Errorf("while receiving data: %s", os.NewSyscallError("recvfrom", err))
+			return fmt.Errorf("while receiving request: %s", err)
 		}
 
-		// I don't know how else to detect if the other side has hung up
-		if n == 0 {
-			log.Printf("%s hung up!", from)
-			return io.EOF
-		}
+		requestData = append(requestData, data[:n]...)
 
-		log.Printf("got data (%d bytes): %s", n, data[:n])
-
-		err = to.write(data[:n])
-		if err != nil {
-			return fmt.Errorf("while sending data: %s", os.NewSyscallError("sendto", err))
+		if strings.HasSuffix(string(requestData), "\r\n\r\n") {
+			break
 		}
 	}
+
+	err := to.write(requestData)
+	if err != nil {
+		return fmt.Errorf("failed to write: %s", err)
+	}
+
+	errGroup.Go(func() error {
+		return forwardOnce(from, to)
+	})
+
+	errGroup.Go(func() error {
+		return forwardOnce(to, from)
+	})
+
+	return errGroup.Wait()
+}
+
+func forwardOnce(from, to socket) error {
+	data := make([]byte, 65535)
+	n, err := from.read(data)
+	if err != nil {
+		return fmt.Errorf("while receiving request: %s", err)
+	}
+
+	// I don't know how else to detect if the other side has hung up
+	if n == 0 {
+		log.Printf("%s hung up!", from)
+		return io.EOF
+	}
+
+	log.Printf("got data (%d bytes): %s", n, data[:n])
+
+	err = to.write(data[:n])
+	if err != nil {
+		return fmt.Errorf("while sending request: %s", err)
+	}
+
+	return nil
 }
 
 type socket struct {
@@ -75,7 +128,7 @@ type socket struct {
 }
 
 func (s socket) read(data []byte) (int, error) {
-	n, _, err := syscall.Recvfrom(s.fd, data, 0)
+	n, _, err := syscall.Recvfrom(s.fd, data, syscall.MSG_WAITALL)
 	if err != nil {
 		return -1, os.NewSyscallError("recvfrom", err)
 	}
@@ -86,6 +139,14 @@ func (s socket) read(data []byte) (int, error) {
 func (s socket) write(data []byte) error {
 	if err := syscall.Sendto(s.fd, data, 0, s.address); err != nil {
 		return os.NewSyscallError("sendto", err)
+	}
+
+	return nil
+}
+
+func (s socket) close() error {
+	if err := syscall.Close(s.fd); err != nil {
+		return os.NewSyscallError("close", err)
 	}
 
 	return nil
