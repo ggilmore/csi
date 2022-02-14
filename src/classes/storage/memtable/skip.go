@@ -2,7 +2,10 @@ package memtable
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
+	"fmt"
+	"io"
 	"math/rand"
 )
 
@@ -218,14 +221,91 @@ func (s *SkipList) RangeScan(start, limit []byte) (Iterator, error) {
 	}, nil
 }
 
-func randomLevel() int {
-	level := 1
+// Each SSTable looks like this:
+//
+// There are three sections:
+// entries_list - list of key-value pairs, each field is prefixed by its length: [key_length (uint32)][key][value_length (uint32)][value]...
+// sparse_index - sorted list of pairs [key][block_offset_in_file (uint32)]. As described in DDIA, this is a much sparser list
+// 				  than a full hashtable. I create a new entry in the index every 4k bytes.
+// index_location: location in file where the sparse index starts (offset (uint32))
+//
+// since the sparse_index is of variable length, putting it at the bottom of the file means that you can write it after you
+// know all the offsets of the key-value entries without to recalculate them (writing the offset at the beggining would require
+// you to bump the offsets by the length of the index
+//
+// you can read the file by 1) reading the 4 byte index_location at the end of the file, 2) parsing the sparse_index
+//                          3) doing a for loop over the index to find the keys you want
 
-	for rand.Float64() < ascendProbability && level < maxLevel {
-		level++
+func (s *SkipList) flushSSTable(w io.Writer) error {
+
+	writer := offsetWriter{
+		wrappedWriter: w,
 	}
 
-	return level
+	var sparseIndex []sparseIndexEntry
+
+	nextCheckpointBytes := uint32(0)
+
+	for node := s.Start; node != s.End; node = node.forward[0] {
+		// write [key_length][key][value_length][value] for each entry
+		startingOffset := writer.Offset
+
+		if nextCheckpointBytes >= startingOffset {
+			sparseIndex = append(sparseIndex, sparseIndexEntry{
+				key:    node.Key,
+				offset: startingOffset,
+			})
+
+			nextCheckpointBytes = startingOffset + uint32(skipListBlockSize)
+		}
+
+		err := writer.WriteUint32(uint32(len(node.Key)))
+		if err != nil {
+			return fmt.Errorf("writing length (%d) of key %q: %w", len(node.Key), node.Key, err)
+		}
+
+		err = writer.Write(node.Key)
+		if err != nil {
+			return fmt.Errorf("writing key %q: %w", node.Key, err)
+		}
+
+		err = writer.WriteUint32(uint32(len(node.Value)))
+		if err != nil {
+			return fmt.Errorf("writing length (%d) of value %q: %w", len(node.Value), node.Value, err)
+		}
+
+		err = writer.Write(node.Value)
+		if err != nil {
+			return fmt.Errorf("writing value %q: %w", node.Key, err)
+		}
+	}
+
+	sparseIndexOffset := writer.Offset
+
+	for _, e := range sparseIndex {
+		// write [key_length][key][offset] for all entries in the sparse index
+		err := writer.WriteUint32(uint32(len(e.key)))
+		if err != nil {
+			return fmt.Errorf("writing length (%d) of key %q in sparse index: %w", len(e.key), e.key, err)
+		}
+
+		err = writer.Write(e.key)
+		if err != nil {
+			return fmt.Errorf("writing key %q in sparse index: %w", e.key, err)
+		}
+
+		err = writer.WriteUint32(e.offset)
+		if err != nil {
+			return fmt.Errorf("writing offset %d in sparse index: %w", e.offset, err)
+		}
+	}
+
+	err := writer.WriteUint32(sparseIndexOffset)
+	if err != nil {
+		return fmt.Errorf("writing starting offset for sparse index: %s", err)
+	}
+
+	return nil
 }
 
 type Node struct {
@@ -317,4 +397,42 @@ func (s *SkipIterator) Key() []byte {
 
 func (s *SkipIterator) Value() []byte {
 	return s.current.Value
+}
+
+type sparseIndexEntry struct {
+	key    []byte
+	offset uint32
+}
+
+// offsetWriter is an io.Writer that keeps track of the current Offset
+type offsetWriter struct {
+	Offset uint32
+
+	wrappedWriter io.Writer
+}
+
+func (o *offsetWriter) Write(b []byte) error {
+	n, err := o.wrappedWriter.Write(b)
+	if err != nil {
+		return err
+	}
+
+	o.Offset += uint32(n)
+	return nil
+}
+
+func (o *offsetWriter) WriteUint32(n uint32) error {
+	var buf [4]byte
+	binary.LittleEndian.PutUint32(buf[:], n)
+	return o.Write(buf[:])
+}
+
+func randomLevel() int {
+	level := 1
+
+	for rand.Float64() < ascendProbability && level < maxLevel {
+		level++
+	}
+
+	return level
 }
