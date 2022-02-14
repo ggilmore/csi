@@ -2,8 +2,9 @@ package memtable
 
 import (
 	"errors"
-	"github.com/google/go-cmp/cmp"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 type entry struct {
@@ -17,8 +18,45 @@ var (
 	Baz = entry{Key: []byte("Baz"), Value: []byte("C")}
 )
 
-func TestInMemory_Delete(t *testing.T) {
-	testDeletion(t, func() DB { return NewInMemory() })
+func TestDelete(t *testing.T) {
+	t.Run("hashtable", func(t *testing.T) {
+		testDeletion(t, func() DB { return NewInMemory() })
+	})
+
+	t.Run("skiplist", func(t *testing.T) {
+		testDeletion(t, func() DB { return NewSkipList() })
+	})
+}
+
+func TestPutAndGet(t *testing.T) {
+	t.Run("hashtable", func(t *testing.T) {
+		testPutGet(t, func() DB { return NewInMemory() })
+	})
+
+	t.Run("skiplist", func(t *testing.T) {
+		testPutGet(t, func() DB { return NewSkipList() })
+	})
+}
+
+func TestHas(t *testing.T) {
+	t.Run("hashtable", func(t *testing.T) {
+		testHas(t, func() DB { return NewInMemory() })
+	})
+
+	t.Run("skiplist", func(t *testing.T) {
+		testHas(t, func() DB { return NewSkipList() })
+	})
+
+}
+
+func TestRangeScan(t *testing.T) {
+	t.Run("hashtable", func(t *testing.T) {
+		testRangeScan(t, func() DB { return NewInMemory() })
+	})
+
+	t.Run("skiplist", func(t *testing.T) {
+		testRangeScan(t, func() DB { return NewSkipList() })
+	})
 }
 
 func testDeletion(t *testing.T, factory func() DB) {
@@ -67,10 +105,6 @@ func testDeletion(t *testing.T, factory func() DB) {
 	if !errors.Is(err, KeyNotFound) {
 		t.Errorf("expected KeyNotFound error for deleted key %q, got: %s", Bar.Key, err)
 	}
-}
-
-func TestInMemory_Put_Get(t *testing.T) {
-	testPutGet(t, func() DB { return NewInMemory() })
 }
 
 func testPutGet(t *testing.T, factory func() DB) {
@@ -134,10 +168,6 @@ func testPutGet(t *testing.T, factory func() DB) {
 	})
 }
 
-func TestInMemory_Has(t *testing.T) {
-	testHas(t, func() DB { return NewInMemory() })
-}
-
 func testHas(t *testing.T, factory func() DB) {
 	db := factory()
 
@@ -178,10 +208,6 @@ func testHas(t *testing.T, factory func() DB) {
 	if contains {
 		t.Errorf("db contains %q when it was never loaded", Bar.Key)
 	}
-}
-
-func TestInMemory_RangeScan(t *testing.T) {
-	testRangeScan(t, func() DB { return NewInMemory() })
 }
 
 func testRangeScan(t *testing.T, factory func() DB) {
