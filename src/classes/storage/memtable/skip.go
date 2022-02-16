@@ -237,7 +237,6 @@ func (s *SkipList) RangeScan(start, limit []byte) (Iterator, error) {
 //                          3) doing a for loop over the index to find the keys you want
 
 func (s *SkipList) flushSSTable(w io.Writer) error {
-
 	writer := offsetWriter{
 		wrappedWriter: w,
 	}
@@ -245,12 +244,12 @@ func (s *SkipList) flushSSTable(w io.Writer) error {
 	var sparseIndex []sparseIndexEntry
 
 	nextCheckpointBytes := uint32(0)
-
-	for node := s.Start; node != s.End; node = node.forward[0] {
+	node := s.Start
+	for node != s.End {
 		// write [key_length][key][value_length][value] for each entry
 		startingOffset := writer.Offset
 
-		if nextCheckpointBytes >= startingOffset {
+		if nextCheckpointBytes <= startingOffset || node.forward[0] == s.End {
 			sparseIndex = append(sparseIndex, sparseIndexEntry{
 				key:    node.Key,
 				offset: startingOffset,

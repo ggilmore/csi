@@ -1,9 +1,11 @@
 package memtable
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
+	"os"
 )
 
 const skipListBlockSize = 1 << 11
@@ -21,12 +23,19 @@ type ImmutableDB interface {
 	RangeScan(start, limit []byte) (Iterator, error)
 }
 
+// ReadAtSeekerCloser combines the io.ReaderAt, io.Seeker, and io.Closer interfaces.
+type ReadAtSeekerCloser interface {
+	io.ReaderAt
+	io.Seeker
+	io.Closer
+}
+
 type SSTable struct {
 	// offset of the first byte after the
 	// sorted list of key-value entries
 	entriesLength uint32
 
-	file        io.ReadSeekCloser
+	reader      ReadAtSeekerCloser
 	sparseIndex []sparseIndexEntry
 }
 
@@ -39,14 +48,20 @@ type SSTable struct {
 // since it makes the stepping logic cleaner. Now, I might have to open the last
 // block no matter what I do since I don't know what the last key in the index is.
 
-func (S SSTable) Get(key []byte) (value []byte, err error) {
+func (s *SSTable) Get(key []byte) (value []byte, err error) {
 	//TODO implement me
+
+	switch len(s.sparseIndex) {
+	case 0:
+		return nil, KeyNotFound
+	}
+
 	panic("implement me")
 }
 
 // Plan: Just use _get_ and throw away the value
 
-func (S SSTable) Has(key []byte) (ret bool, err error) {
+func (s *SSTable) Has(key []byte) (ret bool, err error) {
 	//TODO implement me
 	panic("implement me")
 }
@@ -55,12 +70,85 @@ func (S SSTable) Has(key []byte) (ret bool, err error) {
 // from there, the iterator and keep yielding values until the current key
 // >= limit, or the end of the entries list is reached.
 
-func (S SSTable) RangeScan(start, limit []byte) (Iterator, error) {
+func (s *SSTable) RangeScan(start, limit []byte) (Iterator, error) {
 	//TODO implement me
 	panic("implement me")
 }
 
-func OpenSStable(r io.ReadSeekCloser) (*SSTable, error) {
+func (s *SSTable) findKeyInBlock(start, limit uint32, needle []byte) (value []byte, err error) {
+	r := io.NewSectionReader(s.reader, int64(start), int64(limit-start))
+
+	for {
+		var keyLength uint32
+		err = binary.Read(r, binary.LittleEndian, &keyLength)
+		if err != nil {
+			if err == io.EOF {
+				// we reached the end of the block
+				return nil, KeyNotFound
+			}
+
+			return nil, fmt.Errorf("reading key length: %s", err)
+		}
+
+		key := make([]byte, keyLength)
+		err = binary.Read(r, binary.LittleEndian, &key)
+		if err != nil {
+			if err == io.EOF {
+				return nil, fmt.Errorf("block corruption - hit end of block while reading key")
+			}
+
+			return nil, fmt.Errorf("reading key: %s", err)
+		}
+
+		comparison := bytes.Compare(key, needle)
+		if comparison > 0 {
+			// current key is greater than the needle - the key's not in the block
+			// if we haven't found it by now
+			return nil, KeyNotFound
+		}
+
+		var valueLength uint32
+		err = binary.Read(r, binary.LittleEndian, &valueLength)
+		if err != nil {
+			if err == io.EOF {
+				return nil, fmt.Errorf("block corruption - hit end of block while reading value length")
+			}
+
+			return nil, fmt.Errorf("reading value length: %s", err)
+		}
+
+		if comparison == 0 {
+			// the key == needle, read off the value and return it
+			value := make([]byte, valueLength)
+			err = binary.Read(r, binary.LittleEndian, &value)
+			if err != nil {
+				if err == io.EOF {
+					return nil, fmt.Errorf("block corruption - hit end of block while reading value")
+				}
+
+				return nil, fmt.Errorf("reading value: %s", err)
+			}
+
+			return value, nil
+		}
+
+		// if we reached here, then we're  reading values that are smaller than the key.
+		// We need to keep scanning the other entries in the block. Just skip past the next value then move on.
+		//
+		// Note, we could combine this case with the key == needles case, but
+		// allocating the value slice would create a ton of small unnecessary allocations
+		_, err := r.Seek(int64(valueLength), io.SeekCurrent)
+		if err != nil {
+			if err == io.EOF {
+				return nil, fmt.Errorf("block corruption - hit end of block while seeking past value")
+			}
+
+			return nil, fmt.Errorf("seeking past value: %s", err)
+		}
+	}
+}
+
+func OpenSStable(r *os.File) (*SSTable, error) {
 	indexEnd, err := r.Seek(-4, io.SeekEnd)
 	if err != nil {
 		return nil, fmt.Errorf("seeking to end of file to read index start location: %s", err)
@@ -79,13 +167,14 @@ func OpenSStable(r io.ReadSeekCloser) (*SSTable, error) {
 	if uint32(indexEnd) == indexStart {
 		// this ss table must be empty - we have no index entries
 		return &SSTable{
-			file: r,
+			reader: r,
 		}, nil
 	}
 
 	var sparseIndex []sparseIndexEntry
 
 	for i := indexStart; i < uint32(indexEnd); i++ {
+		// read all
 		var keyLength uint32
 		err := binary.Read(r, binary.LittleEndian, &keyLength)
 		if err != nil {
@@ -111,7 +200,7 @@ func OpenSStable(r io.ReadSeekCloser) (*SSTable, error) {
 	}
 
 	return &SSTable{
-		file:          r,
+		reader:        r,
 		entriesLength: indexStart,
 		sparseIndex:   sparseIndex,
 	}, nil
