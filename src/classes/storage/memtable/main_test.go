@@ -2,6 +2,7 @@ package memtable
 
 import (
 	"errors"
+	"os"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -260,4 +261,58 @@ func testRangeScan(t *testing.T, factory func() DB) {
 	if more {
 		t.Fatalf("iterator didn't stop after yielding what should have been the final key (%q)", Eight.Key)
 	}
+}
+
+func TestSStable(t *testing.T) {
+
+	One := entry{Key: []byte("1"), Value: []byte("A")}
+	Two := entry{Key: []byte("2"), Value: []byte("B")}
+	Three := entry{Key: []byte("3"), Value: []byte("C")}
+	// skip 4
+	Five := entry{Key: []byte("5"), Value: []byte("D")}
+	Six := entry{Key: []byte("6"), Value: []byte("E")}
+	// skip 7
+	Eight := entry{Key: []byte("8"), Value: []byte("F")}
+	Nine := entry{Key: []byte("9"), Value: []byte("G")}
+
+	entries := []entry{One, Two, Three, Five, Six, Eight, Nine}
+
+	dir := t.TempDir()
+	skip := NewSkipList()
+
+	for _, e := range entries {
+		err := skip.Put(e.Key, e.Value)
+		if err != nil {
+			t.Fatalf("loading skiplist with (%q, %q): %s", e.Key, e.Value, err)
+		}
+	}
+
+	file, err := os.CreateTemp(dir, "sstable")
+	if err != nil {
+		t.Fatalf("creating temp file for sstable: %s", err)
+	}
+	defer file.Close()
+
+	err = skip.flushSSTable(file)
+	if err != nil {
+		t.Fatalf("flusing skip list to sstable file %q: %s", file.Name(), err)
+	}
+
+	sstable, err := OpenSStable(file)
+	if err != nil {
+		t.Fatalf("opening sstable file %q: %s", file.Name(), err)
+	}
+
+	for _, e := range entries {
+		value, err := sstable.Get(e.Key)
+		if err != nil {
+			t.Fatalf("getting sstable value for key %q: %s", e.Key, err)
+		}
+
+		if diff := cmp.Diff(e.Value, value); diff != "" {
+			t.Errorf("unexpected diff in values (-want +got):\n%s", diff)
+		}
+
+	}
+
 }

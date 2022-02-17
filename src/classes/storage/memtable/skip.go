@@ -236,7 +236,12 @@ func (s *SkipList) RangeScan(start, limit []byte) (Iterator, error) {
 // you can read the file by 1) reading the 4 byte index_location at the end of the file, 2) parsing the sparse_index
 //                          3) doing a for loop over the index to find the keys you want
 
-func (s *SkipList) flushSSTable(w io.Writer) error {
+func (s *SkipList) flushSSTable(w io.WriteSeeker) error {
+	_, err := w.Seek(0, io.SeekStart)
+	if err != nil {
+		return fmt.Errorf("seeking to start of file: %s", err)
+	}
+
 	writer := offsetWriter{
 		wrappedWriter: w,
 	}
@@ -244,7 +249,7 @@ func (s *SkipList) flushSSTable(w io.Writer) error {
 	var sparseIndex []sparseIndexEntry
 
 	nextCheckpointBytes := uint32(0)
-	node := s.Start
+	node := s.Start.forward[0]
 	for node != s.End {
 		// write [key_length][key][value_length][value] for each entry
 		startingOffset := writer.Offset
@@ -277,6 +282,8 @@ func (s *SkipList) flushSSTable(w io.Writer) error {
 		if err != nil {
 			return fmt.Errorf("writing value %q: %w", node.Key, err)
 		}
+
+		node = node.forward[0]
 	}
 
 	sparseIndexOffset := writer.Offset
@@ -299,7 +306,7 @@ func (s *SkipList) flushSSTable(w io.Writer) error {
 		}
 	}
 
-	err := writer.WriteUint32(sparseIndexOffset)
+	err = writer.WriteUint32(sparseIndexOffset)
 	if err != nil {
 		return fmt.Errorf("writing starting offset for sparse index: %s", err)
 	}
