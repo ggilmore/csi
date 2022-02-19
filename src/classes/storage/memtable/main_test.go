@@ -2,10 +2,15 @@ package memtable
 
 import (
 	"errors"
+	"log"
+	"math/rand"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
+	fuzz "github.com/google/gofuzz"
 )
 
 type entry struct {
@@ -21,43 +26,90 @@ var (
 
 func TestDelete(t *testing.T) {
 	t.Run("hashtable", func(t *testing.T) {
-		testDeletion(t, func() DB { return NewInMemory() })
+		testDeletion(t, func() DB { return NewHashIndex() })
 	})
 
 	t.Run("skiplist", func(t *testing.T) {
-		testDeletion(t, func() DB { return NewSkipList() })
+		testDeletion(t, func() DB { return NewSkipList(SkipListOptions{}) })
 	})
 }
 
 func TestPutAndGet(t *testing.T) {
 	t.Run("hashtable", func(t *testing.T) {
-		testPutGet(t, func() DB { return NewInMemory() })
+		testPutGet(t, func() DB { return NewHashIndex() })
 	})
 
 	t.Run("skiplist", func(t *testing.T) {
-		testPutGet(t, func() DB { return NewSkipList() })
+		testPutGet(t, func() DB { return NewSkipList(SkipListOptions{}) })
 	})
+
+	t.Run("skiplist combined", func(t *testing.T) {
+
+		testPutGet(t, func() DB {
+			dir := t.TempDir()
+			combined, err := NewCombinedSkipAndSS(CombinedSkipAndSSOptions{
+				SSTableDir: dir,
+			})
+			if err != nil {
+				t.Fatalf("NewCombinedSkipAndSS: %s", err)
+			}
+
+			return combined
+		})
+	})
+
 }
 
 func TestHas(t *testing.T) {
 	t.Run("hashtable", func(t *testing.T) {
-		testHas(t, func() DB { return NewInMemory() })
+		testHas(t, func() DB { return NewHashIndex() })
 	})
 
 	t.Run("skiplist", func(t *testing.T) {
-		testHas(t, func() DB { return NewSkipList() })
+		testHas(t, func() DB { return NewSkipList(SkipListOptions{}) })
 	})
 
 }
 
 func TestRangeScan(t *testing.T) {
 	t.Run("hashtable", func(t *testing.T) {
-		testRangeScan(t, func() DB { return NewInMemory() })
+		testRangeScan(t, func() DB { return NewHashIndex() })
 	})
 
 	t.Run("skiplist", func(t *testing.T) {
-		testRangeScan(t, func() DB { return NewSkipList() })
+		testRangeScan(t, func() DB { return NewSkipList(SkipListOptions{}) })
 	})
+}
+
+func TestSkipListFuzz(t *testing.T) {
+	db := NewSkipList(SkipListOptions{})
+
+	entries := generateNUniqueEntries(t, 10000)
+
+	for _, v := range entries {
+		err := db.Put(v.Key, v.Value)
+		if err != nil {
+			t.Fatalf("unexpeceted error when putting value %s: %s", []byte(v.Key), err)
+		}
+	}
+
+	rand.Seed(time.Now().UnixNano())
+	rand.Shuffle(len(entries), func(i, j int) {
+		entries[i], entries[j] = entries[j], entries[i]
+	})
+
+	for _, v := range entries {
+		got, err := db.Get(v.Key)
+		if err != nil {
+			t.Fatalf("unexpeceted error when getting value %s: %s", []byte(v.Key), err)
+		}
+
+		if diff := cmp.Diff(v.Value, got); diff != "" {
+			log.Println(entries)
+			t.Errorf("unexpected diff in values for key %q (-want +got):\n%s", v.Key, diff)
+		}
+
+	}
 }
 
 func testDeletion(t *testing.T, factory func() DB) {
@@ -126,6 +178,10 @@ func testPutGet(t *testing.T, factory func() DB) {
 				Bar,
 				Baz,
 			},
+		},
+		{
+			name:   "fuzz",
+			values: generateNUniqueEntries(t, 5000),
 		},
 	}
 
@@ -264,21 +320,10 @@ func testRangeScan(t *testing.T, factory func() DB) {
 }
 
 func TestSStable(t *testing.T) {
+	entries := generateNUniqueEntries(t, 5000)
 
-	One := entry{Key: []byte("1"), Value: []byte("A")}
-	Two := entry{Key: []byte("2"), Value: []byte("B")}
-	Three := entry{Key: []byte("3"), Value: []byte("C")}
-	// skip 4
-	Five := entry{Key: []byte("5"), Value: []byte("D")}
-	Six := entry{Key: []byte("6"), Value: []byte("E")}
-	// skip 7
-	Eight := entry{Key: []byte("8"), Value: []byte("F")}
-	Nine := entry{Key: []byte("9"), Value: []byte("G")}
-
-	entries := []entry{One, Two, Three, Five, Six, Eight, Nine}
-
-	dir := t.TempDir()
-	skip := NewSkipList()
+	o := SkipListOptions{}
+	skip := NewSkipList(o)
 
 	for _, e := range entries {
 		err := skip.Put(e.Key, e.Value)
@@ -287,7 +332,7 @@ func TestSStable(t *testing.T) {
 		}
 	}
 
-	file, err := os.CreateTemp(dir, "sstable")
+	file, err := os.CreateTemp(t.TempDir(), "sstable")
 	if err != nil {
 		t.Fatalf("creating temp file for sstable: %s", err)
 	}
@@ -303,16 +348,40 @@ func TestSStable(t *testing.T) {
 		t.Fatalf("opening sstable file %q: %s", file.Name(), err)
 	}
 
+	rand.Seed(time.Now().UnixNano())
+	rand.Shuffle(len(entries), func(i, j int) {
+		entries[i], entries[j] = entries[j], entries[i]
+	})
+
 	for _, e := range entries {
 		value, err := sstable.Get(e.Key)
 		if err != nil {
 			t.Fatalf("getting sstable value for key %q: %s", e.Key, err)
 		}
 
-		if diff := cmp.Diff(e.Value, value); diff != "" {
-			t.Errorf("unexpected diff in values (-want +got):\n%s", diff)
+		if diff := cmp.Diff(e.Value, value, cmpopts.EquateEmpty()); diff != "" {
+			t.Fatalf("unexpected diff in values for key %q (-want +got):\n%s", e.Key, diff)
 		}
+	}
+}
 
+func generateNUniqueEntries(t *testing.T, n int) []entry {
+	t.Helper()
+
+	f := fuzz.New().NilChance(0)
+
+	uniqueEntries := make(map[string]entry)
+
+	for len(uniqueEntries) < n {
+		var e entry
+		f.Fuzz(&e)
+		uniqueEntries[string(e.Key)] = e
 	}
 
+	var out []entry
+	for _, e := range uniqueEntries {
+		out = append(out, e)
+	}
+
+	return out
 }

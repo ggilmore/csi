@@ -9,17 +9,33 @@ import (
 	"math/rand"
 )
 
-const maxLevel = 16
-
-var ascendProbability = 0.5
+const (
+	maxLevel          = 16
+	ascendProbability = 0.5
+)
 
 type SkipList struct {
 	level int
 	Start *Node
 	End   *Node
+
+	Size             int
+	ssTableBlockSize int
 }
 
-func NewSkipList() *SkipList {
+type SkipListOptions struct {
+	SSTableBlockSize int
+}
+
+func NewSkipList(options SkipListOptions) *SkipList {
+	o := SkipListOptions{
+		SSTableBlockSize: defaultSSTableBlockSize,
+	}
+
+	if options.SSTableBlockSize > 0 {
+		o.SSTableBlockSize = options.SSTableBlockSize
+	}
+
 	start := &Node{
 		isStart: true,
 	}
@@ -36,6 +52,8 @@ func NewSkipList() *SkipList {
 		level: 1,
 		Start: start,
 		End:   end,
+
+		ssTableBlockSize: o.SSTableBlockSize,
 	}
 }
 
@@ -141,6 +159,8 @@ func (s *SkipList) Put(key, value []byte) error {
 		update[index].forward[index] = newNode
 	}
 
+	s.Size += len(key) + len(value)
+
 	return nil
 }
 
@@ -177,7 +197,6 @@ func (s *SkipList) Delete(key []byte) error {
 	}
 
 	// we have the key, splice ourselves out
-
 	for i := 1; i <= s.level; i++ {
 		index := i - 1
 		if update[index].forward[index] != currentNode {
@@ -190,6 +209,8 @@ func (s *SkipList) Delete(key []byte) error {
 	for s.level >= 1 && s.Start.forward[s.level-1] == s.End {
 		s.level--
 	}
+
+	s.Size -= len(currentNode.Key) + len(currentNode.Value)
 
 	return nil
 }
@@ -236,12 +257,7 @@ func (s *SkipList) RangeScan(start, limit []byte) (Iterator, error) {
 // you can read the file by 1) reading the 4 byte index_location at the end of the file, 2) parsing the sparse_index
 //                          3) doing a for loop over the index to find the keys you want
 
-func (s *SkipList) flushSSTable(w io.WriteSeeker) error {
-	_, err := w.Seek(0, io.SeekStart)
-	if err != nil {
-		return fmt.Errorf("seeking to start of file: %s", err)
-	}
-
+func (s *SkipList) flushSSTable(w io.Writer) error {
 	writer := offsetWriter{
 		wrappedWriter: w,
 	}
@@ -260,7 +276,7 @@ func (s *SkipList) flushSSTable(w io.WriteSeeker) error {
 				offset: startingOffset,
 			})
 
-			nextCheckpointBytes = startingOffset + uint32(skipListBlockSize)
+			nextCheckpointBytes = startingOffset + uint32(s.ssTableBlockSize)
 		}
 
 		err := writer.WriteUint32(uint32(len(node.Key)))
@@ -306,9 +322,9 @@ func (s *SkipList) flushSSTable(w io.WriteSeeker) error {
 		}
 	}
 
-	err = writer.WriteUint32(sparseIndexOffset)
+	err := writer.WriteUint32(sparseIndexOffset)
 	if err != nil {
-		return fmt.Errorf("writing starting offset for sparse index: %s", err)
+		return fmt.Errorf("writing starting offset (%d) for sparse index: %s", sparseIndexOffset, err)
 	}
 
 	return nil

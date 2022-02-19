@@ -8,7 +8,7 @@ import (
 	"io"
 )
 
-const skipListBlockSize = 1 << 11
+const defaultSSTableBlockSize = 1 << 11
 
 type ImmutableDB interface {
 	// Get gets the value for the given key. It returns an error if the
@@ -34,48 +34,38 @@ type ReadAtSeekerCloser interface {
 type SSTable struct {
 	// offset of the first byte after the
 	// sorted list of key-value entries
-	entriesLength uint32
+	entriesEndOffset uint32
 
 	reader      ReadAtSeekerCloser
 	sparseIndex []sparseIndexEntry
 }
 
-// Plan: step through the sparse index, looking for the first index key
-// that is < "key". Use the offset from the index to Seek() there and read until
-// the boundary of the next block, or the end of the entriesList.
-//
-// TODO: I now realized that I  never ensured that the last entry for the SStable
-// was in the index. I should adjust my splitting logic to ensure that happens
-// since it makes the stepping logic cleaner. Now, I might have to open the last
-// block no matter what I do since I don't know what the last key in the index is.
-
 func (s *SSTable) Get(key []byte) (value []byte, err error) {
-	//if len(s.sparseIndex) == 0 {
-	//	// SSTable is empty
-	//	return nil, KeyNotFound
-	//}
-	//
-	//switch len(s.sparseIndex) {
-	//case 0:
-	//	return nil, KeyNotFound
-	//case 1:
-	//	return s.findKeyInBlock(s.sparseIndex[0].offset, s.entriesLength, key)
-	//default:
-	//
-	//}
+	if len(s.sparseIndex) == 0 {
+		return nil, KeyNotFound
+	}
 
-	// use the super slow non-indexed method
-	return s.findKeyInBlock(0, s.entriesLength, key)
+	endOffset := s.entriesEndOffset
+	for i := len(s.sparseIndex) - 1; i >= 0; i-- {
+		indexEntry := s.sparseIndex[i]
+		if bytes.Compare(indexEntry.key, key) <= 0 {
+			return s.findKeyInBlock(indexEntry.offset, endOffset, key)
+		}
 
+		endOffset = indexEntry.offset
+	}
+
+	return nil, KeyNotFound
 }
-
-// Plan: Just use _get_ and throw away the value
 
 func (s *SSTable) Has(key []byte) (ret bool, err error) {
 	_, err = s.Get(key)
+	if err != nil {
+		if errors.Is(err, KeyNotFound) {
+			return false, nil
+		}
 
-	if errors.Is(err, KeyNotFound) {
-		return false, nil
+		return false, err
 	}
 
 	return true, nil
@@ -117,8 +107,7 @@ func (s *SSTable) findKeyInBlock(start, limit uint32, needle []byte) (value []by
 
 		comparison := bytes.Compare(key, needle)
 		if comparison > 0 {
-			// current key is greater than the needle - the key's not in the block
-			// if we haven't found it by now
+			// key > needle - the key's not in the block if we haven't found it by now
 			return nil, KeyNotFound
 		}
 
@@ -133,7 +122,7 @@ func (s *SSTable) findKeyInBlock(start, limit uint32, needle []byte) (value []by
 		}
 
 		if comparison == 0 {
-			// the key == needle, read off the value and return it
+			// key == needle - read off the value and return it
 			value := make([]byte, valueLength)
 			err = binary.Read(r, binary.LittleEndian, &value)
 			if err != nil {
@@ -147,7 +136,7 @@ func (s *SSTable) findKeyInBlock(start, limit uint32, needle []byte) (value []by
 			return value, nil
 		}
 
-		// if we reached here, then we're  reading values that are smaller than the key.
+		// if we reached here, then we're reading values that are smaller than the key.
 		// We need to keep scanning the other entries in the block. Just skip past the next value then move on.
 		//
 		// Note, we could combine this case with the key == needles case, but
@@ -169,17 +158,18 @@ func OpenSStable(r ReadAtSeekerCloser) (*SSTable, error) {
 		return nil, fmt.Errorf("seeking to end of file to read index start location: %s", err)
 	}
 
-	var indexStart uint32
-	err = binary.Read(r, binary.LittleEndian, &indexStart)
+	var s uint32
+	err = binary.Read(r, binary.LittleEndian, &s)
 	if err != nil {
 		return nil, fmt.Errorf("reading index start location: %s", err)
 	}
+	indexStart := int64(s)
 
-	if indexStart > uint32(indexEnd) {
-		return nil, fmt.Errorf("corrupted ss table file: index end (%d) > index start (%d)", uint32(indexEnd), indexStart)
+	if indexStart > indexEnd {
+		return nil, fmt.Errorf("corrupted ss table file: index end (%d) > index start (%d)", indexEnd, indexStart)
 	}
 
-	if uint32(indexEnd) == indexStart {
+	if indexEnd == indexStart {
 		// this ss table must be empty - we have no index entries
 		return &SSTable{
 			reader: r,
@@ -188,17 +178,16 @@ func OpenSStable(r ReadAtSeekerCloser) (*SSTable, error) {
 
 	var sparseIndex []sparseIndexEntry
 
-	_, err = r.Seek(int64(indexStart), io.SeekStart)
+	_, err = r.Seek(indexStart, io.SeekStart)
 	if err != nil {
 		return nil, fmt.Errorf("seeking to start of index: %s", err)
 	}
 
-	sectionReader := io.NewSectionReader(r, int64(indexStart), indexEnd-int64(indexStart))
+	indexReader := io.NewSectionReader(r, indexStart, indexEnd-indexStart)
 
 	for {
-		// read all
 		var keyLength uint32
-		err := binary.Read(sectionReader, binary.LittleEndian, &keyLength)
+		err := binary.Read(indexReader, binary.LittleEndian, &keyLength)
 		if err != nil {
 			if err == io.EOF {
 				// we've hit the end
@@ -209,7 +198,7 @@ func OpenSStable(r ReadAtSeekerCloser) (*SSTable, error) {
 		}
 
 		key := make([]byte, keyLength)
-		_, err = sectionReader.Read(key)
+		_, err = indexReader.Read(key)
 		if err != nil {
 			if err == io.EOF {
 				return nil, fmt.Errorf("index corruption - EOF while reading key")
@@ -218,7 +207,7 @@ func OpenSStable(r ReadAtSeekerCloser) (*SSTable, error) {
 		}
 
 		var blockOffset uint32
-		err = binary.Read(sectionReader, binary.LittleEndian, &blockOffset)
+		err = binary.Read(indexReader, binary.LittleEndian, &blockOffset)
 		if err != nil {
 			if err == io.EOF {
 				return nil, fmt.Errorf("index corruption - EOF while reading value")
@@ -234,8 +223,8 @@ func OpenSStable(r ReadAtSeekerCloser) (*SSTable, error) {
 	}
 
 	return &SSTable{
-		reader:        r,
-		entriesLength: indexStart,
-		sparseIndex:   sparseIndex,
+		reader:           r,
+		entriesEndOffset: uint32(indexStart),
+		sparseIndex:      sparseIndex,
 	}, nil
 }
