@@ -26,26 +26,27 @@ var (
 
 func TestDelete(t *testing.T) {
 	t.Run("hashtable", func(t *testing.T) {
-		testDeletion(t, func() DB { return NewHashIndex() })
+		testDeletion(t, func(t *testing.T) DB { return NewHashIndex() })
 	})
 
 	t.Run("skiplist", func(t *testing.T) {
-		testDeletion(t, func() DB { return NewSkipList(SkipListOptions{}) })
+		testDeletion(t, func(t *testing.T) DB { return NewSkipList(SkipListOptions{}) })
 	})
+
 }
 
 func TestPutAndGet(t *testing.T) {
 	t.Run("hashtable", func(t *testing.T) {
-		testPutGet(t, func() DB { return NewHashIndex() })
+		testPutGet(t, func(t *testing.T) DB { return NewHashIndex() })
 	})
 
 	t.Run("skiplist", func(t *testing.T) {
-		testPutGet(t, func() DB { return NewSkipList(SkipListOptions{}) })
+		testPutGet(t, func(t *testing.T) DB { return NewSkipList(SkipListOptions{}) })
 	})
 
 	t.Run("skiplist combined", func(t *testing.T) {
 
-		testPutGet(t, func() DB {
+		testPutGet(t, func(t *testing.T) DB {
 			dir := t.TempDir()
 			combined, err := NewCombinedSkipAndSS(CombinedSkipAndSSOptions{
 				SSTableDir: dir,
@@ -112,8 +113,10 @@ func TestSkipListFuzz(t *testing.T) {
 	}
 }
 
-func testDeletion(t *testing.T, factory func() DB) {
-	db := factory()
+func testDeletion(t *testing.T, factory func(t *testing.T) DB) {
+	db := factory(t)
+
+	barCopy := Bar
 
 	// load all values
 	for _, e := range []entry{Foo, Bar, Baz} {
@@ -160,7 +163,7 @@ func testDeletion(t *testing.T, factory func() DB) {
 	}
 }
 
-func testPutGet(t *testing.T, factory func() DB) {
+func testPutGet(t *testing.T, factory func(t *testing.T) DB) {
 	tests := []struct {
 		name   string
 		values []entry
@@ -187,7 +190,7 @@ func testPutGet(t *testing.T, factory func() DB) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			db := factory()
+			db := factory(t)
 
 			for _, v := range tt.values {
 				err := db.Put(v.Key, v.Value)
@@ -212,7 +215,7 @@ func testPutGet(t *testing.T, factory func() DB) {
 	}
 
 	t.Run("should return key not found error for unknown key", func(t *testing.T) {
-		db := factory()
+		db := factory(t)
 		err := db.Put(Foo.Key, Foo.Value)
 		if err != nil {
 			t.Errorf("unexpected error when putting value %q, %s", "Foo", err)

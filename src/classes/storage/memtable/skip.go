@@ -267,7 +267,7 @@ func (s *SkipList) flushSSTable(w io.Writer) error {
 	nextCheckpointBytes := uint32(0)
 	node := s.Start.forward[0]
 	for node != s.End {
-		// write [key_length][key][value_length][value] for each entry
+		// write [key_length][key][isDeleted][value_length][value] for each entry
 		startingOffset := writer.Offset
 
 		if nextCheckpointBytes <= startingOffset || node.forward[0] == s.End {
@@ -336,6 +336,9 @@ type Node struct {
 
 	// isEnd indicates that this node is the sentinel "ending" node
 	isEnd bool
+
+	// isDeleted indicates that the key for this node has been deleted
+	isDeleted bool
 
 	Key   []byte
 	Value []byte
@@ -446,6 +449,14 @@ func (o *offsetWriter) Write(b []byte) error {
 func (o *offsetWriter) WriteUint32(n uint32) error {
 	var buf [4]byte
 	binary.LittleEndian.PutUint32(buf[:], n)
+	return o.Write(buf[:])
+}
+
+func (o *offsetWriter) WriteBool(b bool) error {
+	buf := [1]byte{0}
+	if b {
+		buf[0] = 1
+	}
 	return o.Write(buf[:])
 }
 

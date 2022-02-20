@@ -80,6 +80,16 @@ func (s *SSTable) RangeScan(start, limit []byte) (Iterator, error) {
 	panic("implement me")
 }
 
+type KeyDeletedError struct{}
+
+func (k KeyDeletedError) Error() string {
+	return "key has been deleted"
+}
+
+func (k KeyDeletedError) Is(target error) bool {
+	return target == KeyNotFound
+}
+
 func (s *SSTable) findKeyInBlock(start, limit uint32, needle []byte) (value []byte, err error) {
 	r := io.NewSectionReader(s.reader, int64(start), int64(limit-start))
 
@@ -105,6 +115,16 @@ func (s *SSTable) findKeyInBlock(start, limit uint32, needle []byte) (value []by
 			return nil, fmt.Errorf("reading key: %s", err)
 		}
 
+		var isDeleted bool
+		err := binary.Read(r, binary.LittleEndian, &isDeleted)
+		if err != nil {
+			if err == io.EOF {
+				return nil, fmt.Errorf("block corruption - hit end of block while reading isDeleted")
+			}
+
+			return nil, fmt.Errorf("reading isDeleted: %s", err)
+		}
+
 		comparison := bytes.Compare(key, needle)
 		if comparison > 0 {
 			// key > needle - the key's not in the block if we haven't found it by now
@@ -121,8 +141,9 @@ func (s *SSTable) findKeyInBlock(start, limit uint32, needle []byte) (value []by
 			return nil, fmt.Errorf("reading value length: %s", err)
 		}
 
-		if comparison == 0 {
+		if comparison == 0 && !isDeleted {
 			// key == needle - read off the value and return it
+
 			value := make([]byte, valueLength)
 			err = binary.Read(r, binary.LittleEndian, &value)
 			if err != nil {
@@ -136,18 +157,19 @@ func (s *SSTable) findKeyInBlock(start, limit uint32, needle []byte) (value []by
 			return value, nil
 		}
 
-		// if we reached here, then we're reading values that are smaller than the key.
-		// We need to keep scanning the other entries in the block. Just skip past the next value then move on.
-		//
-		// Note, we could combine this case with the key == needles case, but
-		// allocating the value slice would create a ton of small unnecessary allocations
-		_, err := r.Seek(int64(valueLength), io.SeekCurrent)
+		// if we reached here, then we're reading values that are smaller than the key or the key has been deleted.
+		// In either case, we need to skip past the value.
+		_, err = r.Seek(int64(valueLength), io.SeekCurrent)
 		if err != nil {
 			if err == io.EOF {
 				return nil, fmt.Errorf("block corruption - hit end of block while seeking past value")
 			}
 
 			return nil, fmt.Errorf("seeking past value: %s", err)
+		}
+
+		if isDeleted {
+			return nil, KeyDeletedError{}
 		}
 	}
 }
