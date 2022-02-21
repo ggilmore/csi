@@ -2,10 +2,10 @@ package memtable
 
 import (
 	"bytes"
+	"container/heap"
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -23,38 +23,38 @@ type CombinedSkipAndSS struct {
 }
 
 type CombinedSkipAndSSOptions struct {
-	SkipListSizeThreshold int
+	SkipListSizeThresholdBytes int
 
-	SSTableBlockSize int
-	SSTableDir       string
+	SSTableBlockSizeBytes int
+	SSTableDir            string
 }
 
 func NewCombinedSkipAndSS(options CombinedSkipAndSSOptions) (*CombinedSkipAndSS, error) {
 	o := CombinedSkipAndSSOptions{
-		SkipListSizeThreshold: 1 << 21, // ~2MB
-		SSTableDir:            os.TempDir(),
-		SSTableBlockSize:      defaultSSTableBlockSize,
+		SkipListSizeThresholdBytes: 1 << 21, // ~2MB
+		SSTableDir:                 os.TempDir(),
+		SSTableBlockSizeBytes:      defaultSSTableBlockSize,
 	}
 
-	if options.SkipListSizeThreshold > 0 {
-		o.SkipListSizeThreshold = options.SkipListSizeThreshold
+	if options.SkipListSizeThresholdBytes > 0 {
+		o.SkipListSizeThresholdBytes = options.SkipListSizeThresholdBytes
 	}
 
 	if options.SSTableDir != "" {
 		o.SSTableDir = options.SSTableDir
 	}
 
-	if options.SSTableBlockSize > 0 {
-		o.SSTableBlockSize = options.SSTableBlockSize
+	if options.SSTableBlockSizeBytes > 0 {
+		o.SSTableBlockSizeBytes = options.SSTableBlockSizeBytes
 	}
 
 	out := CombinedSkipAndSS{
-		skipList:         NewSkipList(SkipListOptions{SSTableBlockSize: o.SSTableBlockSize}),
-		deletionSkipList: NewSkipList(SkipListOptions{SSTableBlockSize: o.SSTableBlockSize}),
+		skipList:         NewSkipList(SkipListOptions{SSTableBlockSize: o.SSTableBlockSizeBytes}),
+		deletionSkipList: NewSkipList(SkipListOptions{SSTableBlockSize: o.SSTableBlockSizeBytes}),
 
 		SSTableDir:            filepath.Clean(o.SSTableDir),
-		SkipListSizeThreshold: o.SkipListSizeThreshold,
-		SSTableBlockSize:      o.SSTableBlockSize,
+		SkipListSizeThreshold: o.SkipListSizeThresholdBytes,
+		SSTableBlockSize:      o.SSTableBlockSizeBytes,
 	}
 
 	// if the index directory exists, load in all the existing sstables
@@ -109,10 +109,7 @@ func (c *CombinedSkipAndSS) Get(key []byte) (value []byte, err error) {
 		value, err := db.Get(key)
 		if err != nil {
 			if errors.As(err, &KeyDeletedError{}) {
-				// short circuit if we find out that the key is
-				// deleted
-
-				log.Println("error", "key", key)
+				// stop looking if the key is deleted
 				return nil, KeyNotFound
 			}
 
@@ -329,7 +326,7 @@ func (c *CombinedSkipAndSS) flushtoSStable(w io.Writer) error {
 	return nil
 }
 
-func (c CombinedSkipAndSS) Delete(key []byte) error {
+func (c *CombinedSkipAndSS) Delete(key []byte) error {
 	contains, err := c.skipList.Has(key)
 	if err != nil {
 		return fmt.Errorf("removing key from skiplist: %w", err)
@@ -354,6 +351,149 @@ func (c CombinedSkipAndSS) Delete(key []byte) error {
 }
 
 func (c CombinedSkipAndSS) RangeScan(start, limit []byte) (Iterator, error) {
-	//TODO implement me
-	panic("implement me")
+	var queue CombinedPriorityQueue
+	heap.Init(&queue)
+
+	var dbs []ImmutableDB
+	for _, s := range c.ssTables {
+		dbs = append(dbs, s)
+	}
+
+	dbs = append(dbs, c.skipList)
+
+	for i, db := range dbs {
+		iterator, err := db.RangeScan(start, limit)
+		if err != nil {
+			return nil, fmt.Errorf("rangescanning db #%d: %w", i, err)
+		}
+
+		hasFirstItem := iterator.Next()
+		if iterator.Error() != nil {
+			return nil, fmt.Errorf("getting first item from iterator for db #%d: %w", i, iterator.Error())
+		}
+
+		if !hasFirstItem {
+			continue
+		}
+
+		item := &queueItem{
+			priority: i,
+			iterator: iterator,
+			key:      iterator.Key(),
+			value:    iterator.Value(),
+		}
+
+		heap.Push(&queue, item)
+	}
+
+	return &CombinedSkipAndSSIterator{
+		queue: &queue,
+	}, nil
+
+}
+
+type CombinedSkipAndSSIterator struct {
+	queue *CombinedPriorityQueue
+
+	key   []byte
+	value []byte
+
+	yieldedFirstKey bool
+
+	err error
+}
+
+func (c *CombinedSkipAndSSIterator) Next() bool {
+	for c.queue.Len() > 0 {
+		foundNext := false
+
+		// pull the next smallest item off the queue
+		item := heap.Pop(c.queue).(*queueItem)
+
+		// if this item is the first one we've yielded, or it's larger
+		// than the last key we yielded (filter out entries from
+		// sstables that are "lower priority") , save the value
+		if !c.yieldedFirstKey || bytes.Compare(c.key, item.key) < 0 {
+			c.key = item.key
+			c.value = item.value
+			c.yieldedFirstKey = true
+
+			foundNext = true
+		}
+
+		iteratorHasMore := item.iterator.Next()
+
+		if item.iterator.Error() != nil {
+			c.err = item.iterator.Error()
+			return false
+		}
+
+		// if the iterator we pulled off has more values,
+		// get its next value then put it back on the queue
+		if iteratorHasMore {
+			item.key = item.iterator.Key()
+			item.value = item.iterator.Value()
+
+			heap.Push(c.queue, item)
+		}
+
+		if foundNext {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (c *CombinedSkipAndSSIterator) Error() error {
+	return c.err
+}
+
+func (c *CombinedSkipAndSSIterator) Key() []byte {
+	return c.key
+}
+
+func (c *CombinedSkipAndSSIterator) Value() []byte {
+	return c.value
+}
+
+type CombinedPriorityQueue []*queueItem
+
+func (c CombinedPriorityQueue) Len() int { return len(c) }
+func (c CombinedPriorityQueue) Less(i, j int) bool {
+	// first compare keys, but if they're the same
+	// then prefer iterators with higher priority
+	switch bytes.Compare(c[i].key, c[j].key) {
+	case -1:
+		return true
+	case 1:
+		return false
+	default:
+		return c[i].priority > c[j].priority
+	}
+}
+
+func (c CombinedPriorityQueue) Swap(i, j int) {
+	c[i], c[j] = c[j], c[i]
+}
+
+func (c *CombinedPriorityQueue) Push(x interface{}) {
+	*c = append(*c, x.(*queueItem))
+}
+
+func (c *CombinedPriorityQueue) Pop() interface{} {
+	old := *c
+	n := len(old)
+	x := old[n-1]
+	*c = old[0 : n-1]
+	return x
+}
+
+type queueItem struct {
+	// priority is used to disambiguate
+	priority int
+	iterator Iterator
+
+	key   []byte
+	value []byte
 }

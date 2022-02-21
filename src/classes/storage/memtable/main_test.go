@@ -61,7 +61,7 @@ func TestDelete(t *testing.T) {
 	})
 
 	t.Run("skiplist combined small sstable size", func(t *testing.T) {
-		testDeletion(t, CombinedSkipAndSSFactory(CombinedSkipAndSSOptions{SkipListSizeThreshold: 1}))
+		testDeletion(t, CombinedSkipAndSSFactory(CombinedSkipAndSSOptions{SkipListSizeThresholdBytes: 1}))
 	})
 }
 
@@ -79,7 +79,7 @@ func TestPutAndGet(t *testing.T) {
 	})
 
 	t.Run("skiplist combined small sstable size", func(t *testing.T) {
-		testPutGet(t, CombinedSkipAndSSFactory(CombinedSkipAndSSOptions{SkipListSizeThreshold: 1}))
+		testPutGet(t, CombinedSkipAndSSFactory(CombinedSkipAndSSOptions{SkipListSizeThresholdBytes: 1}))
 	})
 }
 
@@ -97,17 +97,25 @@ func TestHas(t *testing.T) {
 	})
 
 	t.Run("skiplist combined small sstable size", func(t *testing.T) {
-		testHas(t, CombinedSkipAndSSFactory(CombinedSkipAndSSOptions{SkipListSizeThreshold: 1}))
+		testHas(t, CombinedSkipAndSSFactory(CombinedSkipAndSSOptions{SkipListSizeThresholdBytes: 1}))
 	})
 }
 
 func TestRangeScan(t *testing.T) {
 	t.Run("hashtable", func(t *testing.T) {
-		testRangeScan(t, func() DB { return NewHashIndex() })
+		testRangeScan(t, func(t *testing.T) DB { return NewHashIndex() })
 	})
 
 	t.Run("skiplist", func(t *testing.T) {
-		testRangeScan(t, func() DB { return NewSkipList(SkipListOptions{}) })
+		testRangeScan(t, func(t *testing.T) DB { return NewSkipList(SkipListOptions{}) })
+	})
+
+	t.Run("skiplist combined", func(t *testing.T) {
+		testRangeScan(t, CombinedSkipAndSSFactory(CombinedSkipAndSSOptions{}))
+	})
+
+	t.Run("skiplist combined small sstable size", func(t *testing.T) {
+		testRangeScan(t, CombinedSkipAndSSFactory(CombinedSkipAndSSOptions{SkipListSizeThresholdBytes: 1}))
 	})
 }
 
@@ -143,10 +151,16 @@ func TestSkipListFuzz(t *testing.T) {
 }
 
 func testDeletion(t *testing.T, factory func(t *testing.T) DB) {
+
+	Foo := entry{Key: []byte("Foo"), Value: []byte("A")}
+	BarOld := entry{Key: []byte("Bar"), Value: []byte("B-old")}
+	BarNew := entry{Key: []byte("Bar"), Value: []byte("B-new")}
+	Baz := entry{Key: []byte("Baz"), Value: []byte("C")}
+
 	db := factory(t)
 
 	// load all values
-	for _, e := range []entry{Foo, Bar, Baz} {
+	for _, e := range []entry{Foo, BarOld, BarNew, Baz} {
 		err := db.Put(e.Key, e.Value)
 		if err != nil {
 			t.Fatalf("unexpected error when putting key %q with value %q: %s", e.Key, e.Value, err)
@@ -154,7 +168,7 @@ func testDeletion(t *testing.T, factory func(t *testing.T) DB) {
 	}
 
 	// ensure that we can retrieve the values that we put in
-	for _, e := range []entry{Foo, Bar, Baz} {
+	for _, e := range []entry{Foo, BarNew, Baz} {
 		v, err := db.Get(e.Key)
 		if err != nil {
 			t.Fatalf("unexpected error when getting key %q: %s", e.Key, err)
@@ -166,7 +180,7 @@ func testDeletion(t *testing.T, factory func(t *testing.T) DB) {
 	}
 
 	// delete one value
-	err := db.Delete(Bar.Key)
+	err := db.Delete(BarNew.Key)
 	if err != nil {
 		t.Fatalf("unexpected error when deleting key %q: %s", Bar.Key, err)
 	}
@@ -184,7 +198,7 @@ func testDeletion(t *testing.T, factory func(t *testing.T) DB) {
 	}
 
 	// ensure that the key we deleted can't be retrieved
-	_, err = db.Get(Bar.Key)
+	_, err = db.Get(BarNew.Key)
 	if !errors.Is(err, KeyNotFound) {
 		t.Errorf("expected KeyNotFound error for deleted key %q, got: %s", Bar.Key, err)
 	}
@@ -195,12 +209,6 @@ func testPutGet(t *testing.T, factory factory) {
 		name   string
 		values []entry
 	}{
-		{
-			name: "single",
-			values: []entry{
-				Foo,
-			},
-		},
 		{
 			name: "multiple",
 			values: []entry{
@@ -324,20 +332,21 @@ func testHas(t *testing.T, factory factory) {
 	}
 }
 
-func testRangeScan(t *testing.T, factory func() DB) {
+func testRangeScan(t *testing.T, factory factory) {
 	One := entry{Key: []byte("1"), Value: []byte("A")}
 	Two := entry{Key: []byte("2"), Value: []byte("B")}
 	Three := entry{Key: []byte("3"), Value: []byte("C")}
 	// skip 4
-	Five := entry{Key: []byte("5"), Value: []byte("D")}
+	FiveOld := entry{Key: []byte("5"), Value: []byte("D-old")}
+	FiveNew := entry{Key: []byte("5"), Value: []byte("D-new")}
 	Six := entry{Key: []byte("6"), Value: []byte("E")}
 	// skip 7
 	Eight := entry{Key: []byte("8"), Value: []byte("F")}
 	Nine := entry{Key: []byte("9"), Value: []byte("G")}
 
-	db := factory()
+	db := factory(t)
 
-	for _, e := range []entry{One, Two, Three, Five, Six, Eight, Nine} {
+	for _, e := range []entry{One, Two, Three, FiveOld, Six, Eight, Nine, FiveNew} {
 		err := db.Put(e.Key, e.Value)
 		if err != nil {
 			t.Fatalf("unexpected error when loading key %q: %s", e.Key, err)
@@ -349,7 +358,7 @@ func testRangeScan(t *testing.T, factory func() DB) {
 		t.Fatalf("unexpected error when range scanning [%q, %q): %s", One.Key, Nine.Key, err)
 	}
 
-	for _, e := range []entry{One, Two, Three, Five, Six, Eight} {
+	for _, e := range []entry{One, Two, Three, FiveNew, Six, Eight} {
 		more := iter.Next()
 		if !more {
 			t.Fatalf("iterator stopped before yielding key %q", e.Key)

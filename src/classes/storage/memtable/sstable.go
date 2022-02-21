@@ -45,12 +45,12 @@ func (s *SSTable) Get(key []byte) (value []byte, err error) {
 		return nil, KeyNotFound
 	}
 
-	start, end, eligible := s.findClosestBlock(key)
+	startOffset, endOffset, eligible := s.findClosestBlock(key)
 	if !eligible {
 		return nil, KeyNotFound
 	}
 
-	return s.findKeyInBlock(start, end, key)
+	return s.findKeyInBlock(startOffset, endOffset, key)
 }
 
 func (s *SSTable) Has(key []byte) (ret bool, err error) {
@@ -71,10 +71,14 @@ func (s *SSTable) Has(key []byte) (ret bool, err error) {
 // >= limit, or the end of the entries list is reached.
 
 func (s *SSTable) RangeScan(start, limit []byte) (Iterator, error) {
-	startOffset, _, eligible := s.findClosestBlock(start)
-	if !eligible {
-		// quick hack - the iterator will return false immediately if we don't g
-		startOffset = s.entriesEndOffset
+	var startOffset uint32
+	for i := len(s.sparseIndex) - 1; i >= 0; i-- {
+		indexEntry := s.sparseIndex[i]
+		startOffset = indexEntry.offset
+
+		if bytes.Compare(indexEntry.key, start) <= 0 {
+			break
+		}
 	}
 
 	return &SSIterator{
