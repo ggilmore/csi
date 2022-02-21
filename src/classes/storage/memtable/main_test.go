@@ -24,52 +24,81 @@ var (
 	Baz = entry{Key: []byte("Baz"), Value: []byte("C")}
 )
 
+type factory func(t *testing.T) DB
+
+func HashIndexFactory(t *testing.T) DB { return NewHashIndex() }
+
+func SkipListFactory(options SkipListOptions) factory {
+	return func(t *testing.T) DB {
+		return NewSkipList(options)
+	}
+}
+func CombinedSkipAndSSFactory(o CombinedSkipAndSSOptions) factory {
+	return func(t *testing.T) DB {
+		dir := t.TempDir()
+		o.SSTableDir = dir
+
+		combined, err := NewCombinedSkipAndSS(o)
+		if err != nil {
+			t.Fatalf("NewCombinedSkipAndSS: %s", err)
+		}
+
+		return combined
+	}
+}
+
 func TestDelete(t *testing.T) {
 	t.Run("hashtable", func(t *testing.T) {
-		testDeletion(t, func(t *testing.T) DB { return NewHashIndex() })
+		testDeletion(t, HashIndexFactory)
 	})
 
 	t.Run("skiplist", func(t *testing.T) {
-		testDeletion(t, func(t *testing.T) DB { return NewSkipList(SkipListOptions{}) })
+		testDeletion(t, SkipListFactory(SkipListOptions{}))
 	})
 
+	t.Run("skiplist combined", func(t *testing.T) {
+		testDeletion(t, CombinedSkipAndSSFactory(CombinedSkipAndSSOptions{}))
+	})
+
+	t.Run("skiplist combined small sstable size", func(t *testing.T) {
+		testDeletion(t, CombinedSkipAndSSFactory(CombinedSkipAndSSOptions{SkipListSizeThreshold: 1}))
+	})
 }
 
 func TestPutAndGet(t *testing.T) {
 	t.Run("hashtable", func(t *testing.T) {
-		testPutGet(t, func(t *testing.T) DB { return NewHashIndex() })
+		testPutGet(t, HashIndexFactory)
 	})
 
 	t.Run("skiplist", func(t *testing.T) {
-		testPutGet(t, func(t *testing.T) DB { return NewSkipList(SkipListOptions{}) })
+		testPutGet(t, SkipListFactory(SkipListOptions{}))
 	})
 
 	t.Run("skiplist combined", func(t *testing.T) {
-
-		testPutGet(t, func(t *testing.T) DB {
-			dir := t.TempDir()
-			combined, err := NewCombinedSkipAndSS(CombinedSkipAndSSOptions{
-				SSTableDir: dir,
-			})
-			if err != nil {
-				t.Fatalf("NewCombinedSkipAndSS: %s", err)
-			}
-
-			return combined
-		})
+		testPutGet(t, CombinedSkipAndSSFactory(CombinedSkipAndSSOptions{}))
 	})
 
+	t.Run("skiplist combined small sstable size", func(t *testing.T) {
+		testPutGet(t, CombinedSkipAndSSFactory(CombinedSkipAndSSOptions{SkipListSizeThreshold: 1}))
+	})
 }
 
 func TestHas(t *testing.T) {
 	t.Run("hashtable", func(t *testing.T) {
-		testHas(t, func() DB { return NewHashIndex() })
+		testHas(t, HashIndexFactory)
 	})
 
 	t.Run("skiplist", func(t *testing.T) {
-		testHas(t, func() DB { return NewSkipList(SkipListOptions{}) })
+		testHas(t, SkipListFactory(SkipListOptions{}))
 	})
 
+	t.Run("skiplist combined", func(t *testing.T) {
+		testHas(t, CombinedSkipAndSSFactory(CombinedSkipAndSSOptions{}))
+	})
+
+	t.Run("skiplist combined small sstable size", func(t *testing.T) {
+		testHas(t, CombinedSkipAndSSFactory(CombinedSkipAndSSOptions{SkipListSizeThreshold: 1}))
+	})
 }
 
 func TestRangeScan(t *testing.T) {
@@ -116,8 +145,6 @@ func TestSkipListFuzz(t *testing.T) {
 func testDeletion(t *testing.T, factory func(t *testing.T) DB) {
 	db := factory(t)
 
-	barCopy := Bar
-
 	// load all values
 	for _, e := range []entry{Foo, Bar, Baz} {
 		err := db.Put(e.Key, e.Value)
@@ -163,7 +190,7 @@ func testDeletion(t *testing.T, factory func(t *testing.T) DB) {
 	}
 }
 
-func testPutGet(t *testing.T, factory func(t *testing.T) DB) {
+func testPutGet(t *testing.T, factory factory) {
 	tests := []struct {
 		name   string
 		values []entry
@@ -184,7 +211,7 @@ func testPutGet(t *testing.T, factory func(t *testing.T) DB) {
 		},
 		{
 			name:   "fuzz",
-			values: generateNUniqueEntries(t, 5000),
+			values: generateNUniqueEntries(t, 50),
 		},
 	}
 
@@ -226,10 +253,37 @@ func testPutGet(t *testing.T, factory func(t *testing.T) DB) {
 			t.Errorf("expected KeyNotFound error, got: %s", err)
 		}
 	})
+	t.Run("should return the latest version of a key if it was inserted multiple times", func(t *testing.T) {
+		fooV1 := entry{Key: []byte("foo"), Value: []byte("v1")}
+		fooV2 := entry{Key: []byte("foo"), Value: []byte("v2")}
+		fooV3 := entry{Key: []byte("foo"), Value: []byte("v3")}
+		entries := []entry{
+			fooV1, Bar, fooV2, Baz, fooV3,
+		}
+
+		db := factory(t)
+		for _, e := range entries {
+			err := db.Put(e.Key, e.Value)
+			if err != nil {
+				t.Fatalf("unexpected error when putting (%q, %q): %s", e.Key, e.Value, err)
+			}
+		}
+
+		for _, e := range []entry{Bar, Baz, fooV3} {
+			value, err := db.Get(e.Key)
+			if err != nil {
+				t.Fatalf("unexpected error when retrieving value for %q: %s", e.Key, err)
+			}
+			if diff := cmp.Diff(e.Value, value); diff != "" {
+				t.Errorf("unexpected diff in value (-want +got):\n%s", diff)
+			}
+		}
+
+	})
 }
 
-func testHas(t *testing.T, factory func() DB) {
-	db := factory()
+func testHas(t *testing.T, factory factory) {
+	db := factory(t)
 
 	for _, e := range []entry{Foo, Bar, Baz} {
 		contains, err := db.Has(e.Key)

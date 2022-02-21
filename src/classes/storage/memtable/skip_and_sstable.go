@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -107,9 +108,11 @@ func (c *CombinedSkipAndSS) Get(key []byte) (value []byte, err error) {
 	for i, db := range dbs {
 		value, err := db.Get(key)
 		if err != nil {
-			if errors.Is(err, KeyDeletedError{}) {
+			if errors.As(err, &KeyDeletedError{}) {
 				// short circuit if we find out that the key is
 				// deleted
+
+				log.Println("error", "key", key)
 				return nil, KeyNotFound
 			}
 
@@ -156,7 +159,7 @@ func (c *CombinedSkipAndSS) Put(key, value []byte) error {
 			return fmt.Errorf("creating directory %q: %w", c.SSTableDir, err)
 		}
 
-		tempFile, err := os.CreateTemp(c.SSTableDir, "new-*.sstable")
+		tempFile, err := os.CreateTemp(c.SSTableDir, "newsstable-*.tmp")
 		if err != nil {
 			return fmt.Errorf("creating temporary file for sstable %w", err)
 		}
@@ -185,7 +188,7 @@ func (c *CombinedSkipAndSS) Put(key, value []byte) error {
 
 		ssTable, err := OpenSStable(file)
 		if err != nil {
-			return fmt.Errorf("opening sstable from file %q: %s", file.Name(), err)
+			return fmt.Errorf("loading sstable from file %q: %s", file.Name(), err)
 		}
 
 		c.ssTables = append(c.ssTables, ssTable)
@@ -265,7 +268,7 @@ func (c *CombinedSkipAndSS) flushtoSStable(w io.Writer) error {
 			continue
 		}
 
-		err := writeNode(currentNormalNode, true)
+		err := writeNode(currentNormalNode, false)
 		if err != nil {
 			return fmt.Errorf("writing normal node: %s", err)
 		}
@@ -274,7 +277,7 @@ func (c *CombinedSkipAndSS) flushtoSStable(w io.Writer) error {
 	}
 
 	for currentNormalNode != c.skipList.End {
-		err := writeNode(currentNormalNode, true)
+		err := writeNode(currentNormalNode, false)
 		if err != nil {
 			return fmt.Errorf("writing normal node: %s", err)
 		}
@@ -333,7 +336,7 @@ func (c CombinedSkipAndSS) Delete(key []byte) error {
 
 	}
 
-	if !contains {
+	if contains {
 		err := c.skipList.Delete(key)
 		if err != nil {
 			return fmt.Errorf("removing key from skiplist: %w", err)
