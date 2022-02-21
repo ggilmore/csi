@@ -36,7 +36,7 @@ func SkipListFactory(options SkipListOptions) factory {
 func CombinedSkipAndSSFactory(o CombinedSkipAndSSOptions) factory {
 	return func(t *testing.T) DB {
 		dir := t.TempDir()
-		o.SSTableDir = dir
+		o.SSTableDirectory = dir
 
 		combined, err := NewCombinedSkipAndSS(o)
 		if err != nil {

@@ -14,25 +14,27 @@ import (
 type CombinedSkipAndSS struct {
 	ssTables []*SSTable
 
-	skipList         *SkipList
+	skipList *SkipList
+	// deletionSkipList is used to keep track of deletes that need to be
+	// persisted to sstables
 	deletionSkipList *SkipList
 
-	SkipListSizeThreshold int
-	SSTableBlockSize      int
-	SSTableDir            string
+	SkipListSizeThresholdBytes int
+	SSTableBlockSizeBytes      int
+	SSTableDirectory           string
 }
 
 type CombinedSkipAndSSOptions struct {
 	SkipListSizeThresholdBytes int
 
 	SSTableBlockSizeBytes int
-	SSTableDir            string
+	SSTableDirectory      string
 }
 
 func NewCombinedSkipAndSS(options CombinedSkipAndSSOptions) (*CombinedSkipAndSS, error) {
 	o := CombinedSkipAndSSOptions{
 		SkipListSizeThresholdBytes: 1 << 21, // ~2MB
-		SSTableDir:                 os.TempDir(),
+		SSTableDirectory:           os.TempDir(),
 		SSTableBlockSizeBytes:      defaultSSTableBlockSize,
 	}
 
@@ -40,8 +42,8 @@ func NewCombinedSkipAndSS(options CombinedSkipAndSSOptions) (*CombinedSkipAndSS,
 		o.SkipListSizeThresholdBytes = options.SkipListSizeThresholdBytes
 	}
 
-	if options.SSTableDir != "" {
-		o.SSTableDir = options.SSTableDir
+	if options.SSTableDirectory != "" {
+		o.SSTableDirectory = options.SSTableDirectory
 	}
 
 	if options.SSTableBlockSizeBytes > 0 {
@@ -52,18 +54,18 @@ func NewCombinedSkipAndSS(options CombinedSkipAndSSOptions) (*CombinedSkipAndSS,
 		skipList:         NewSkipList(SkipListOptions{SSTableBlockSize: o.SSTableBlockSizeBytes}),
 		deletionSkipList: NewSkipList(SkipListOptions{SSTableBlockSize: o.SSTableBlockSizeBytes}),
 
-		SSTableDir:            filepath.Clean(o.SSTableDir),
-		SkipListSizeThreshold: o.SkipListSizeThresholdBytes,
-		SSTableBlockSize:      o.SSTableBlockSizeBytes,
+		SSTableDirectory:           filepath.Clean(o.SSTableDirectory),
+		SkipListSizeThresholdBytes: o.SkipListSizeThresholdBytes,
+		SSTableBlockSizeBytes:      o.SSTableBlockSizeBytes,
 	}
 
 	// if the index directory exists, load in all the existing sstables
-	if _, err := os.Stat(filepath.Clean(out.SSTableDir)); err == nil {
+	if _, err := os.Stat(out.SSTableDirectory); err == nil {
 		var sstables []*SSTable
 
-		ssTableFiles, err := filepath.Glob(filepath.Join(out.SSTableDir, "*.sstable"))
+		ssTableFiles, err := filepath.Glob(filepath.Join(out.SSTableDirectory, "*.sstable"))
 		if err != nil {
-			return nil, fmt.Errorf("listing all sstables in index dir %q: %w", options.SSTableDir, err)
+			return nil, fmt.Errorf("listing all sstables in index dir %q: %w", options.SSTableDirectory, err)
 		}
 
 		// sort in increasing numerical order
@@ -90,26 +92,29 @@ func NewCombinedSkipAndSS(options CombinedSkipAndSSOptions) (*CombinedSkipAndSS,
 }
 
 func (c *CombinedSkipAndSS) Get(key []byte) (value []byte, err error) {
-	contains, err := c.deletionSkipList.Has(key)
+	deleted, err := c.deletionSkipList.Has(key)
 	if err != nil {
 		return nil, fmt.Errorf("checking deletion skip list: %w", err)
 	}
 
-	if contains {
+	if deleted {
 		return nil, KeyNotFound
 	}
 
-	// data sources are checked from newest to oldest
-	dbs := []ImmutableDB{c.skipList}
+	// dbsNewestToOldest is a sorted list of datasources that we're going to check
+	// [active skiplist][newest sstable]...[oldest sstable]
+	var dbsNewestToOldest []ImmutableDB
+	dbsNewestToOldest = append(dbsNewestToOldest, c.skipList)
 	for i := len(c.ssTables) - 1; i >= 0; i-- {
-		dbs = append(dbs, c.ssTables[i])
+		dbsNewestToOldest = append(dbsNewestToOldest, c.ssTables[i])
 	}
 
-	for i, db := range dbs {
+	// we prefer data from the newest datasources
+	for i, db := range dbsNewestToOldest {
 		value, err := db.Get(key)
 		if err != nil {
 			if errors.As(err, &KeyDeletedError{}) {
-				// stop looking if the key is deleted
+				// stop looking if the key has been explicitly marked as deleted
 				return nil, KeyNotFound
 			}
 
@@ -150,13 +155,14 @@ func (c *CombinedSkipAndSS) Put(key, value []byte) error {
 		return fmt.Errorf("inserting into skiplist: %w", err)
 	}
 
-	if (c.skipList.Size + c.deletionSkipList.Size) >= c.SkipListSizeThreshold {
-		err := os.MkdirAll(c.SSTableDir, 0666)
+	if (c.skipList.Size + c.deletionSkipList.Size) >= c.SkipListSizeThresholdBytes {
+		// we're over our size threshold - write out an sstableile
+		err := os.MkdirAll(c.SSTableDirectory, 0666)
 		if err != nil {
-			return fmt.Errorf("creating directory %q: %w", c.SSTableDir, err)
+			return fmt.Errorf("creating directory %q: %w", c.SSTableDirectory, err)
 		}
 
-		tempFile, err := os.CreateTemp(c.SSTableDir, "newsstable-*.tmp")
+		tempFile, err := os.CreateTemp(c.SSTableDirectory, "newsstable-*.tmp")
 		if err != nil {
 			return fmt.Errorf("creating temporary file for sstable %w", err)
 		}
@@ -166,12 +172,12 @@ func (c *CombinedSkipAndSS) Put(key, value []byte) error {
 			os.Remove(tempFile.Name())
 		}()
 
-		err = c.flushtoSStable(tempFile)
+		err = c.flushToSStable(tempFile)
 		if err != nil {
 			return fmt.Errorf("flushing sstable to file %q: %w", tempFile.Name(), err)
 		}
 
-		finalPath := filepath.Join(c.SSTableDir, fmt.Sprintf("%d.sstable", len(c.ssTables)))
+		finalPath := filepath.Join(c.SSTableDirectory, fmt.Sprintf("%d.sstable", len(c.ssTables)))
 		err = os.Rename(tempFile.Name(), finalPath)
 		if err != nil {
 			return fmt.Errorf("renaming temporary sstable file %q to final sstable file %q: %w", tempFile.Name(), finalPath, err)
@@ -183,12 +189,12 @@ func (c *CombinedSkipAndSS) Put(key, value []byte) error {
 			return fmt.Errorf("opening sstable file %q: %w", finalPath, err)
 		}
 
-		ssTable, err := OpenSStable(file)
+		s, err := OpenSStable(file)
 		if err != nil {
 			return fmt.Errorf("loading sstable from file %q: %s", file.Name(), err)
 		}
 
-		c.ssTables = append(c.ssTables, ssTable)
+		c.ssTables = append(c.ssTables, s)
 		c.skipList = NewSkipList(SkipListOptions{})
 		c.deletionSkipList = NewSkipList(SkipListOptions{})
 	}
@@ -196,7 +202,7 @@ func (c *CombinedSkipAndSS) Put(key, value []byte) error {
 	return nil
 }
 
-func (c *CombinedSkipAndSS) flushtoSStable(w io.Writer) error {
+func (c *CombinedSkipAndSS) flushToSStable(w io.Writer) error {
 	writer := offsetWriter{
 		wrappedWriter: w,
 	}
@@ -217,7 +223,7 @@ func (c *CombinedSkipAndSS) flushtoSStable(w io.Writer) error {
 				offset: startingOffset,
 			})
 
-			nextCheckpointBytes = startingOffset + uint32(c.SSTableBlockSize)
+			nextCheckpointBytes = startingOffset + uint32(c.SSTableBlockSizeBytes)
 		}
 
 		// write [key_length][key][isDeleted][value_length][value]
@@ -342,6 +348,7 @@ func (c *CombinedSkipAndSS) Delete(key []byte) error {
 		return nil
 	}
 
+	// cache deletions that'll eventually be flushed into a sstable
 	err = c.deletionSkipList.Put(key, nil)
 	if err != nil {
 		return fmt.Errorf("puting key in deletion skiplist: %w", err)
@@ -354,14 +361,13 @@ func (c CombinedSkipAndSS) RangeScan(start, limit []byte) (Iterator, error) {
 	var queue CombinedPriorityQueue
 	heap.Init(&queue)
 
-	var dbs []ImmutableDB
-	for _, s := range c.ssTables {
-		dbs = append(dbs, s)
+	var dbsNewestToOldest []ImmutableDB
+	dbsNewestToOldest = append(dbsNewestToOldest, c.skipList)
+	for i := len(c.ssTables) - 1; i >= 0; i-- {
+		dbsNewestToOldest = append(dbsNewestToOldest, c.ssTables[i])
 	}
 
-	dbs = append(dbs, c.skipList)
-
-	for i, db := range dbs {
+	for i, db := range dbsNewestToOldest {
 		iterator, err := db.RangeScan(start, limit)
 		if err != nil {
 			return nil, fmt.Errorf("rangescanning db #%d: %w", i, err)
@@ -377,10 +383,10 @@ func (c CombinedSkipAndSS) RangeScan(start, limit []byte) (Iterator, error) {
 		}
 
 		item := &queueItem{
-			priority: i,
-			iterator: iterator,
-			key:      iterator.Key(),
-			value:    iterator.Value(),
+			iteratorAge: i,
+			iterator:    iterator,
+			key:         iterator.Key(),
+			value:       iterator.Value(),
 		}
 
 		heap.Push(&queue, item)
@@ -411,8 +417,8 @@ func (c *CombinedSkipAndSSIterator) Next() bool {
 		item := heap.Pop(c.queue).(*queueItem)
 
 		// if this item is the first one we've yielded, or it's larger
-		// than the last key we yielded (filter out entries from
-		// sstables that are "lower priority") , save the value
+		// than the last key we yielded (filtering out duplicate keys from
+		// older sstables), save the k/v pair
 		if !c.yieldedFirstKey || bytes.Compare(c.key, item.key) < 0 {
 			c.key = item.key
 			c.value = item.value
@@ -461,15 +467,14 @@ type CombinedPriorityQueue []*queueItem
 
 func (c CombinedPriorityQueue) Len() int { return len(c) }
 func (c CombinedPriorityQueue) Less(i, j int) bool {
-	// first compare keys, but if they're the same
-	// then prefer iterators with higher priority
+	// prefer smaller keys, then newer iterators
 	switch bytes.Compare(c[i].key, c[j].key) {
 	case -1:
 		return true
 	case 1:
 		return false
 	default:
-		return c[i].priority > c[j].priority
+		return c[i].iteratorAge < c[j].iteratorAge
 	}
 }
 
@@ -490,9 +495,8 @@ func (c *CombinedPriorityQueue) Pop() interface{} {
 }
 
 type queueItem struct {
-	// priority is used to disambiguate
-	priority int
-	iterator Iterator
+	iteratorAge int
+	iterator    Iterator
 
 	key   []byte
 	value []byte
