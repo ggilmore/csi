@@ -1,7 +1,10 @@
 package main
 
 import (
-	"encoding/binary"
+	"hash/fnv"
+	"math"
+
+	"github.com/spaolacci/murmur3"
 )
 
 type bloomFilter interface {
@@ -16,24 +19,67 @@ type bloomFilter interface {
 }
 
 type trivialBloomFilter struct {
-	data []uint64
+	capacity int
+	bitset   *bitset
 }
 
-func newTrivialBloomFilter() *trivialBloomFilter {
+func newTrivialBloomFilter(capacity int, falsePositiveRate float64) *trivialBloomFilter {
+	storageSize := int(math.Ceil((float64(capacity) / math.Ln2) * math.Log2(1.0/falsePositiveRate)))
 	return &trivialBloomFilter{
-		data: make([]uint64, 1000),
+		bitset:   newBitset(storageSize),
+		capacity: capacity,
 	}
 }
 
 func (b *trivialBloomFilter) add(item string) {
-	// Do nothing
+	i1, i2 := b.getIndexes(item)
+	err := b.bitset.mark(i1)
+	if err != nil {
+		panic(err)
+	}
+
+	err = b.bitset.mark(i2)
+	if err != nil {
+		panic(err)
+	}
+}
+
+func (b *trivialBloomFilter) getIndexes(item string) (int, int) {
+	hash := fnv.New64()
+	_, err := hash.Write([]byte(item))
+	if err != nil {
+		panic(err)
+	}
+
+	index := hash.Sum64() % uint64(b.bitset.capacity)
+
+	hash2 := murmur3.New64()
+	_, err = hash2.Write([]byte(item))
+	if err != nil {
+		panic(err)
+	}
+
+	index2 := hash2.Sum64() % uint64(b.bitset.capacity)
+
+	return int(index), int(index2)
 }
 
 func (b *trivialBloomFilter) maybeContains(item string) bool {
-	// Technically, any item "might" be in the set
-	return true
+	index, index2 := b.getIndexes(item)
+
+	contains, err := b.bitset.isMarked(index)
+	if err != nil {
+		panic(err)
+	}
+
+	contains2, err := b.bitset.isMarked(index2)
+	if err != nil {
+		panic(err)
+	}
+
+	return contains && contains2
 }
 
 func (b *trivialBloomFilter) memoryUsage() int {
-	return binary.Size(b.data)
+	return b.bitset.size()
 }

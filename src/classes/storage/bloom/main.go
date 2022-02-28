@@ -35,7 +35,7 @@ func main() {
 	start := time.Now()
 
 	// TODO: Replace trivialBloomFilter with your own implementation
-	var b bloomFilter = newTrivialBloomFilter()
+	var b bloomFilter = newTrivialBloomFilter(len(words)/2, .15)
 
 	// Add every other word (even indices)
 	for i := 0; i < len(words); i += 2 {
