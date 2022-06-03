@@ -6,4 +6,4 @@ nodejs 14.15.4
 yarn 1.22.5
 just 0.8.3
 deno 1.7.0
-golang 1.17.1
+golang 1.18.2
